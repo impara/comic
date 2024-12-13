@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Create Your Comic Strip - AI Comic Generator</title>
+    <!-- jQuery first -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- Stripe -->
+    <script src="https://js.stripe.com/v3/"></script>
+    <!-- Custom JS -->
+    <script src="assets/js/ui-manager.js" type="module"></script>
+    <script src="assets/js/form-handler.js" type="module"></script>
+    <script src="assets/js/comic-generator.js" type="module"></script>
+    <script src="assets/js/sharing.js" type="module"></script>
+    <script src="assets/js/story-examples.js" type="module"></script>
+    <script src="assets/js/main.js" type="module"></script>
+    <!-- Custom CSS -->
+    <style>
+        :root {
+            --primary-color: #4a90e2;
+            --secondary-color: #f39c12;
+            --accent-color: #e74c3c;
+            --transition-speed: 0.3s;
+            --transition-timing: ease-in-out;
+        }
+
+        body {
+            background-color: #f8f9fa;
+            font-family: 'Arial', sans-serif;
+        }
+
+        .wizard-container {
+            max-width: 900px;
+            margin: 2rem auto;
+        }
+
+        .step-card {
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            padding: 2rem;
+            margin-bottom: 2rem;
+            position: relative;
+        }
+
+        .progress-bar {
+            height: 8px;
+            border-radius: 4px;
+            transition: width 0.6s var(--transition-timing);
+        }
+
+        .step-indicators .step {
+            position: relative;
+            padding-bottom: 10px;
+            color: #6c757d;
+            transition: color var(--transition-speed) var(--transition-timing);
+        }
+
+        .step-indicators .step::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 0;
+            height: 2px;
+            background-color: var(--primary-color);
+            transition: width var(--transition-speed) var(--transition-timing);
+        }
+
+        .step-indicators .step.active {
+            color: var(--primary-color);
+        }
+
+        .step-indicators .step.active::after {
+            width: 100%;
+        }
+
+        .style-option,
+        .background-option,
+        .character-option {
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+            border: 2px solid transparent;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .style-option:hover,
+        .background-option:hover,
+        .character-option:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        .style-option.selected,
+        .background-option.selected,
+        .character-option.selected {
+            border-color: var(--primary-color);
+            background-color: rgba(74, 144, 226, 0.1);
+        }
+
+        .selected-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(74, 144, 226, 0.1);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            border-radius: 6px;
+        }
+
+        .selected-overlay i {
+            color: var(--primary-color);
+            font-size: 2rem;
+        }
+
+        .style-option.selected .selected-overlay,
+        .background-option.selected .selected-overlay,
+        .character-option.selected .selected-overlay {
+            display: flex;
+        }
+
+        .character-count {
+            color: #6c757d;
+            font-size: 0.9rem;
+        }
+
+        #storyTextarea {
+            resize: vertical;
+            min-height: 150px;
+            transition: border-color 0.3s ease;
+        }
+
+        #storyTextarea:focus {
+            box-shadow: 0 0 0 0.2rem rgba(74, 144, 226, 0.25);
+        }
+
+        .step-content {
+            opacity: 0;
+            transform: translateX(20px);
+            transition: all var(--transition-speed) var(--transition-timing);
+            position: absolute;
+            width: 100%;
+            pointer-events: none;
+        }
+
+        .step-content.active {
+            opacity: 1;
+            transform: translateX(0);
+            position: relative;
+            pointer-events: all;
+        }
+
+        .btn-next {
+            background-color: var(--primary-color);
+            color: white;
+        }
+
+        .btn-back {
+            background-color: #6c757d;
+            color: white;
+        }
+
+        .loading-spinner {
+            width: 3rem;
+            height: 3rem;
+        }
+
+        .character-preview img {
+            max-height: 200px;
+            object-fit: contain;
+        }
+
+        .custom-character {
+            position: relative;
+        }
+
+        .custom-character .character-image {
+            width: 100%;
+            height: 150px;
+            object-fit: cover;
+            border-radius: 8px;
+        }
+
+        .custom-character .character-name {
+            margin-top: 0.5rem;
+            font-size: 0.9rem;
+        }
+
+        /* Loading Animation */
+        @keyframes generatePulse {
+            0% {
+                transform: scale(1);
+                opacity: 1;
+            }
+
+            50% {
+                transform: scale(1.1);
+                opacity: 0.7;
+            }
+
+            100% {
+                transform: scale(1);
+                opacity: 1;
+            }
+        }
+
+        .generating .loading-spinner {
+            animation: generatePulse 1.5s infinite;
+        }
+
+        /* Selection Animations */
+        .selected-overlay {
+            display: none;
+        }
+
+        .selected-overlay i {
+            color: var(--primary-color);
+            font-size: 2rem;
+        }
+
+        .example-prompt {
+            cursor: pointer;
+            transition: all 0.2s ease-in-out;
+            border: 1px solid #e9ecef;
+        }
+
+        .example-prompt:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            border-color: var(--primary-color);
+        }
+
+        .example-prompt h6 {
+            color: var(--primary-color);
+            margin-bottom: 0.5rem;
+        }
+
+        .example-prompt p {
+            color: #495057;
+            font-size: 0.95rem;
+            line-height: 1.5;
+        }
+
+        #examplePrompts {
+            margin-top: 1rem;
+        }
+
+        #examplePromptsList {
+            margin-bottom: 0;
+        }
+
+        .background-option {
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+            border: 2px solid transparent;
+            border-radius: 8px;
+            overflow: hidden;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .background-option img {
+            width: 100%;
+            aspect-ratio: 1;
+            object-fit: cover;
+            border-radius: 6px;
+        }
+
+        .background-option .text-center {
+            margin-top: 0.5rem;
+            font-size: 0.9rem;
+            font-weight: 500;
+        }
+
+        .background-option:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        .background-option.selected {
+            border-color: var(--primary-color);
+            background-color: rgba(74, 144, 226, 0.1);
+        }
+
+        .row.g-3 {
+            --bs-gutter-x: 1rem;
+            --bs-gutter-y: 1rem;
+        }
+
+        @media (max-width: 768px) {
+            .background-option {
+                margin-bottom: 1rem;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <!-- Header -->
+    <nav class="navbar navbar-expand-lg navbar-light bg-light">
+        <div class="container">
+            <a class="navbar-brand" href="index.html">
+                <img src="assets/images/logo.png" alt="Comic Generator Logo" height="40">
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="index.html">Home</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="input.html">Create Comic</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#gallery">Gallery</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="container wizard-container">
+        <!-- Progress Bar -->
+        <div class="progress mb-4">
+            <div class="progress-bar" role="progressbar" style="width: 25%" aria-valuenow="25" aria-valuemin="0"
+                aria-valuemax="100"></div>
+        </div>
+
+        <!-- Step Indicators -->
+        <div class="row mb-4">
+            <div class="col">
+                <div class="step-indicators d-flex justify-content-between">
+                    <span class="step active" data-step="1">Tell Your Story</span>
+                    <span class="step" data-step="2">Customize</span>
+                    <span class="step" data-step="3">Review & Pay</span>
+                    <span class="step" data-step="4">Generate</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Form Steps -->
+        <form id="comicForm">
+            <!-- Step 1: Input Story -->
+            <div class="step-content active" id="step1">
+                <div class="step-card">
+                    <h2 class="mb-4">Step 1: Tell Your Story</h2>
+                    <p class="text-muted">Enter a short story or prompt you'd like to see transformed into a comic
+                        strip.</p>
+
+                    <div class="mb-4">
+                        <div class="form-group">
+                            <textarea id="story-input" class="form-control" placeholder="Once upon a time..."
+                                maxlength="500" rows="6" aria-label="Story input" required></textarea>
+                            <div class="d-flex justify-content-between align-items-center mt-2">
+                                <div class="character-count text-muted">
+                                    <span id="currentCount">0</span>/500 characters
+                                </div>
+                                <small id="char-requirement" class="text-danger">
+                                    Minimum 50 characters required
+                                </small>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-4">
+                        <button class="btn btn-link text-decoration-none" type="button" data-bs-toggle="collapse"
+                            data-bs-target="#examplePrompts" aria-expanded="false" aria-controls="examplePrompts">
+                            <i class="fas fa-lightbulb me-2"></i>View Example Prompts
+                        </button>
+                        <div class="collapse" id="examplePrompts">
+                            <div class="card card-body bg-light border-0">
+                                <h6 class="mb-3">Sample Story Prompts:</h6>
+                                <ul class="list-unstyled mb-0" id="examplePromptsList">
+                                    <!-- Story examples will be dynamically populated here -->
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="d-flex justify-content-end">
+                        <button type="button" class="btn btn-primary" id="next-step-1" disabled>
+                            Next <i class="fas fa-arrow-right ms-2"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 2: Customize Comic -->
+            <div class="step-content" id="step2">
+                <div class="step-card">
+                    <h2 class="mb-4">Step 2: Customize Your Comic</h2>
+                    <p class="text-muted">Choose your preferred styles and elements to personalize your comic strip.</p>
+
+                    <div class="row">
+                        <!-- Left Column: Customization Options -->
+                        <div class="col-lg-8">
+                            <!-- Art Style Selection -->
+                            <div class="mb-4">
+                                <h5 class="mb-3">
+                                    <i class="fas fa-palette me-2"></i>Art Style
+                                    <span class="text-danger">*</span>
+                                </h5>
+                                <div class="row g-3">
+                                    <div class="col-6 col-md-3">
+                                        <div class="style-option p-2" data-style="classic">
+                                            <img src="assets/styles/classic.png" class="img-fluid rounded"
+                                                alt="Classic Style">
+                                            <div class="text-center mt-2">Classic</div>
+                                            <div class="selected-overlay">
+                                                <i class="fas fa-check-circle"></i>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-6 col-md-3">
+                                        <div class="style-option p-2" data-style="modern">
+                                            <img src="assets/styles/modern.png" class="img-fluid rounded"
+                                                alt="Modern Style">
+                                            <div class="text-center mt-2">Modern</div>
+                                            <div class="selected-overlay">
+                                                <i class="fas fa-check-circle"></i>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-6 col-md-3">
+                                        <div class="style-option p-2" data-style="manga">
+                                            <img src="assets/styles/manga.png" class="img-fluid rounded"
+                                                alt="Manga Style">
+                                            <div class="text-center mt-2">Manga</div>
+                                            <div class="selected-overlay">
+                                                <i class="fas fa-check-circle"></i>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-6 col-md-3">
+                                        <div class="style-option p-2" data-style="cartoon">
+                                            <img src="assets/styles/cartoon.png" class="img-fluid rounded"
+                                                alt="Cartoon Style">
+                                            <div class="text-center mt-2">Cartoon</div>
+                                            <div class="selected-overlay">
+                                                <i class="fas fa-check-circle"></i>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Character Upload Section -->
+                            <div class="mb-4">
+                                <h5 class="mb-3">
+                                    <i class="fas fa-user-plus me-2"></i>Upload Characters
+                                </h5>
+
+                                <!-- Character Upload Form -->
+                                <div class="card">
+                                    <div class="card-body">
+                                        <div class="row">
+                                            <!-- Upload Form -->
+                                            <div class="col-md-6">
+                                                <div class="mb-3">
+                                                    <label for="characterUpload" class="form-label">Character
+                                                        Image</label>
+                                                    <input type="file" class="form-control" id="characterUpload"
+                                                        accept="image/*">
+                                                </div>
+                                                <div class="mb-3">
+                                                    <label for="characterName" class="form-label">Character Name</label>
+                                                    <input type="text" class="form-control" id="characterName"
+                                                        placeholder="Enter character name">
+                                                </div>
+                                                <button type="button" class="btn btn-primary w-100"
+                                                    id="uploadCharacter">
+                                                    <i class="fas fa-upload me-2"></i>Upload Character
+                                                </button>
+                                            </div>
+
+                                            <!-- Preview -->
+                                            <div class="col-md-6">
+                                                <div class="text-center">
+                                                    <h6 class="mb-3">Preview</h6>
+                                                    <div class="preview-container">
+                                                        <img id="characterPreview"
+                                                            src="assets/images/placeholder-character.png"
+                                                            class="img-fluid rounded mb-2" alt="Character Preview">
+                                                        <div class="preview-name text-muted">No image selected</div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Character Grid -->
+                                <div class="mt-4">
+                                    <h6 class="mb-3">Uploaded Characters:</h6>
+                                    <div class="character-grid row g-3" id="characterGrid">
+                                        <!-- Characters will be added here dynamically -->
+                                    </div>
+                                    <div id="customCharactersList" class="mt-3">
+                                        <!-- Character tags will be added here -->
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Background Selection -->
+                            <div class="row mb-4">
+                                <div class="col-12">
+                                    <h5 class="mb-3">
+                                        <i class="fas fa-image me-2"></i>Background <span class="text-danger">*</span>
+                                    </h5>
+                                </div>
+                                <div class="col-12">
+                                    <div class="row g-3">
+                                        <div class="col-6 col-md-3">
+                                            <div class="background-option p-2" data-background="city">
+                                                <img src="assets/backgrounds/city.png" class="img-fluid rounded"
+                                                    alt="City Background">
+                                                <div class="text-center mt-2">City</div>
+                                                <div class="selected-overlay">
+                                                    <i class="fas fa-check-circle"></i>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="col-6 col-md-3">
+                                            <div class="background-option p-2" data-background="nature">
+                                                <img src="assets/backgrounds/nature.png" class="img-fluid rounded"
+                                                    alt="Nature Background">
+                                                <div class="text-center mt-2">Nature</div>
+                                                <div class="selected-overlay">
+                                                    <i class="fas fa-check-circle"></i>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="col-6 col-md-3">
+                                            <div class="background-option p-2" data-background="fantasy">
+                                                <img src="assets/backgrounds/fantasy.png" class="img-fluid rounded"
+                                                    alt="Fantasy Background">
+                                                <div class="text-center mt-2">Fantasy</div>
+                                                <div class="selected-overlay">
+                                                    <i class="fas fa-check-circle"></i>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="col-6 col-md-3">
+                                            <div class="background-option p-2" data-background="space">
+                                                <img src="assets/backgrounds/space.png" class="img-fluid rounded"
+                                                    alt="Space Background">
+                                                <div class="text-center mt-2">Space</div>
+                                                <div class="selected-overlay">
+                                                    <i class="fas fa-check-circle"></i>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Right Column: Live Preview -->
+                        <div class="col-lg-4">
+                            <div class="live-preview-container sticky-top" style="top: 2rem;">
+                                <h5 class="mb-3">
+                                    <i class="fas fa-eye me-2"></i>Live Preview
+                                </h5>
+                                <div class="live-preview-pane p-3 border rounded">
+                                    <div id="comicPreview" class="text-center">
+                                        <div class="preview-placeholder">
+                                            <i class="fas fa-image fa-3x mb-3 text-muted"></i>
+                                            <p class="text-muted">Your comic preview will appear here as you make
+                                                selections</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="selection-status mt-3">
+                                    <div class="d-flex justify-content-between mb-2">
+                                        <span>Art Style</span>
+                                        <span id="styleStatus" class="text-danger">
+                                            <i class="fas fa-times-circle"></i>
+                                        </span>
+                                    </div>
+                                    <div class="d-flex justify-content-between mb-2">
+                                        <span>Characters</span>
+                                        <span id="charactersStatus" class="text-danger">
+                                            <i class="fas fa-times-circle"></i>
+                                        </span>
+                                    </div>
+                                    <div class="d-flex justify-content-between">
+                                        <span>Background</span>
+                                        <span id="backgroundStatus" class="text-danger">
+                                            <i class="fas fa-times-circle"></i>
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Navigation Buttons -->
+                    <div class="text-end mt-4">
+                        <button type="button" id="back-step-2" class="btn btn-outline-secondary me-2">
+                            <i class="fas fa-arrow-left me-2"></i>Back
+                        </button>
+                        <button type="button" id="next-step-2" class="btn btn-primary" disabled>
+                            Next Step<i class="fas fa-arrow-right ms-2"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 3: Review & Payment -->
+            <div class="step-content" id="step3">
+                <div class="step-card">
+                    <h2 class="mb-4">Step 3: Review & Payment</h2>
+
+                    <div class="review-summary mb-4">
+                        <div class="mb-4">
+                            <h5 class="mb-3">Your Story</h5>
+                            <div id="storyPreview" class="border p-3 rounded bg-light"></div>
+                        </div>
+
+                        <div class="mb-4">
+                            <h5 class="mb-3">Selected Style</h5>
+                            <div class="selected-style-preview">
+                                <div id="stylePreview" class="border p-3 rounded">
+                                    <div class="row align-items-center">
+                                        <div class="col-auto">
+                                            <img id="selectedStyleImage" src="" alt="Selected Style"
+                                                class="img-fluid rounded" style="max-width: 150px;">
+                                        </div>
+                                        <div class="col">
+                                            <h6 id="selectedStyleName" class="mb-0"></h6>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="mb-4">
+                            <h5 class="mb-3">Uploaded Characters</h5>
+                            <div id="selectedCharactersPreview" class="border p-3 rounded">
+                                <div class="row g-3" id="characterPreviewGrid"></div>
+                            </div>
+                        </div>
+
+                        <div class="mb-4">
+                            <h5 class="mb-3">Selected Background</h5>
+                            <div id="backgroundPreview" class="border p-3 rounded">
+                                <div class="row align-items-center">
+                                    <div class="col-auto">
+                                        <img id="selectedBackgroundImage" src="" alt="Selected Background"
+                                            class="img-fluid rounded" style="max-width: 150px;">
+                                    </div>
+                                    <div class="col">
+                                        <h6 id="selectedBackgroundName" class="mb-0"></h6>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="pricing mt-4">
+                            <h5>Total Cost</h5>
+                            <p class="h3 text-primary">$4.99</p>
+                        </div>
+                    </div>
+
+                    <div class="text-end">
+                        <button type="button" id="back-step-3" class="btn btn-outline-secondary me-2">
+                            <i class="fas fa-arrow-left me-2"></i>Back
+                        </button>
+                        <button type="button" id="payButton" class="btn btn-primary">
+                            Pay Now<i class="fas fa-arrow-right ms-2"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 4: Generating Comic -->
+            <div class="step-content" id="step4">
+                <div class="step-card text-center">
+                    <h2 class="mb-4">Step 4: Generating Your Comic</h2>
+
+                    <div id="generatingStatus">
+                        <div class="spinner-border loading-spinner text-primary mb-3" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <p class="lead">Your comic is being generated. Please wait...</p>
+                        <div class="progress mb-3">
+                            <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar"
+                                style="width: 0%"></div>
+                        </div>
+                    </div>
+
+                    <div id="completionStatus" style="display: none;">
+                        <div class="alert alert-success mb-4">
+                            <h4>Your Comic is Ready!</h4>
+                            <p>Your masterpiece has been created successfully.</p>
+                        </div>
+
+                        <div class="comic-preview mb-4">
+                            <!-- Generated comic will be displayed here -->
+                        </div>
+
+                        <div class="action-buttons">
+                            <button type="button" class="btn btn-primary me-2">Download Comic</button>
+                            <button type="button" class="btn btn-success me-2">Share</button>
+                            <button type="button" class="btn btn-outline-primary">Create Another Comic</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </form>
+    </div>
+
+    <!-- Footer -->
+    <footer class="bg-light py-4 mt-5">
+        <div class="container text-center">
+            <p class="mb-0">&copy; 2024 AI Comic Generator. All rights reserved.</p>
+        </div>
+    </footer>
+</body>
+
+</html>
