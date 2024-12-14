@@ -685,7 +685,8 @@
                         <button type="button" id="back-step-3" class="btn btn-outline-secondary me-2">
                             <i class="fas fa-arrow-left me-2"></i>Back
                         </button>
-                        <button type="button" id="payButton" class="btn btn-primary">
+                        <button type="button" id="payButton" class="btn btn-primary"
+                            onclick="console.log('Pay button clicked');">
                             Pay Now<i class="fas fa-arrow-right ms-2"></i>
                         </button>
                     </div>
@@ -710,9 +711,18 @@
 
                     <!-- Debug Information Section -->
                     <div id="debugInfo" class="mt-4 p-3 bg-light border rounded text-start"
-                        style="max-height: 300px; overflow-y: auto;">
+                        style="max-height: 300px; overflow-y: auto; display: block !important;">
                         <h6 class="mb-3"><i class="fas fa-bug me-2"></i>Debug Information</h6>
-                        <div class="small text-muted">Request and response details will appear here...</div>
+                        <div class="small">
+                            <div class="mb-2">Page Loaded: <span id="pageLoadTime"></span></div>
+                            <div class="mb-2">Session Storage:
+                                <pre id="sessionStorageContent"></pre>
+                            </div>
+                            <div class="mb-2">Form State:
+                                <pre id="formStateContent"></pre>
+                            </div>
+                            <div class="mb-2">Last Action: <span id="lastAction">None</span></div>
+                        </div>
                     </div>
 
                     <div id="completionStatus" style="display: none;">
@@ -742,6 +752,44 @@
             <p class="mb-0">&copy; 2024 AI Comic Generator. All rights reserved.</p>
         </div>
     </footer>
+
+    <!-- Debug Initialization -->
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            // Set page load time
+            document.getElementById('pageLoadTime').textContent = new Date().toLocaleTimeString();
+
+            // Update session storage content
+            function updateDebugInfo() {
+                // Session Storage
+                const sessionData = {};
+                for (let i = 0; i < sessionStorage.length; i++) {
+                    const key = sessionStorage.key(i);
+                    sessionData[key] = sessionStorage.getItem(key);
+                }
+                document.getElementById('sessionStorageContent').textContent =
+                    JSON.stringify(sessionData, null, 2);
+
+                // Form State
+                const formState = {
+                    story: document.getElementById('story-input')?.value,
+                    currentStep: document.querySelector('.step.active')?.dataset.step
+                };
+                document.getElementById('formStateContent').textContent =
+                    JSON.stringify(formState, null, 2);
+            }
+
+            // Update debug info every 2 seconds
+            setInterval(updateDebugInfo, 2000);
+
+            // Log when pay button is clicked
+            document.getElementById('payButton').addEventListener('click', function () {
+                document.getElementById('lastAction').textContent =
+                    'Pay button clicked at ' + new Date().toLocaleTimeString();
+                console.log('Pay button clicked (from debug script)');
+            });
+        });
+    </script>
 </body>
 
 </html>
