@@ -172,11 +172,7 @@ class CharacterProcessor
 
             // Convert saved path to URL
             $baseUrl = $this->config->getBaseUrl();
-
-            // Extract the filename from the saved path
             $filename = basename($savedImagePath);
-
-            // Construct the public URL
             $finalUrl = $baseUrl . '/public/generated/' . $filename;
 
             $this->logger->info("Constructed image URL", [
@@ -187,18 +183,45 @@ class CharacterProcessor
             ]);
 
             // Process through cartoonification
-            $result = $this->replicateClient->cartoonify($finalUrl);
+            $prediction = $this->replicateClient->cartoonify($finalUrl);
+            $predictionId = $prediction['id'];
 
-            if (!isset($result['output'])) {
-                throw new Exception("Failed to process character image");
+            // Poll for result with timeout
+            $maxAttempts = 30; // 30 seconds timeout
+            $attempts = 0;
+            $result = null;
+
+            while ($attempts < $maxAttempts) {
+                $this->logger->debug("Polling for result", [
+                    'attempt' => $attempts + 1,
+                    'prediction_id' => $predictionId
+                ]);
+
+                // Check if result exists in temp storage
+                $tempFile = "/var/www/comic.amertech.online/public/temp/{$predictionId}.json";
+                if (file_exists($tempFile)) {
+                    $storedResult = json_decode(file_get_contents($tempFile), true);
+                    if (isset($storedResult['output'])) {
+                        $result = $storedResult;
+                        break;
+                    }
+                }
+
+                sleep(1);
+                $attempts++;
+            }
+
+            if (!$result || !isset($result['output'])) {
+                throw new Exception("Cartoonification timed out or failed");
             }
 
             return $result['output'];
         } catch (Exception $e) {
             $this->logger->error("Image processing failed", [
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
             ]);
-            throw new Exception("Failed to process character image");
+            throw new Exception("Failed to process character image: " . $e->getMessage());
         }
     }
 }
