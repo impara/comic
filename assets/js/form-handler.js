@@ -63,9 +63,16 @@ export const FormHandler = {
             UIManager.showGeneratingState();
 
             // Prepare the form data
+            const selectedCharacters = JSON.parse(sessionStorage.getItem('selectedCharacters') || '[]');
+            const characterData = JSON.parse(sessionStorage.getItem('characterData') || '{}');
+
             const formData = {
-                characters: this.selectedCharacters.map(id => {
-                    const charData = JSON.parse(sessionStorage.getItem('characterData') || '{}')[id];
+                characters: selectedCharacters.map(id => {
+                    const charData = characterData[id];
+                    if (!charData) {
+                        console.error('Character data not found for ID:', id);
+                        return null;
+                    }
                     return {
                         id: charData.id,
                         name: charData.name,
@@ -76,11 +83,20 @@ export const FormHandler = {
                             style: sessionStorage.getItem('selectedStyle')
                         }
                     };
-                }),
+                }).filter(char => char !== null),
                 scene_description: JSON.parse(sessionStorage.getItem('userStory') || '""'),
                 art_style: sessionStorage.getItem('selectedStyle'),
                 background: sessionStorage.getItem('selectedBackground')
             };
+
+            // Log raw data for debugging
+            console.log('Raw session data:', {
+                selectedCharacters,
+                characterData,
+                userStory: sessionStorage.getItem('userStory'),
+                selectedStyle: sessionStorage.getItem('selectedStyle'),
+                selectedBackground: sessionStorage.getItem('selectedBackground')
+            });
 
             // Validate data before sending
             const validationErrors = [];
@@ -139,12 +155,18 @@ export const FormHandler = {
             };
             console.log('Debug - Full request context:', requestDebug);
 
+            // Get API URL
+            const apiUrl = new URL('api.php', window.location.href).href;
+            console.log('API URL:', apiUrl);
+
             // Send the request to generate comic
             $.ajax({
-                url: 'api.php',
+                url: apiUrl,
                 type: 'POST',
                 data: JSON.stringify(formData),
                 contentType: 'application/json',
+                dataType: 'json',
+                timeout: 30000, // 30 second timeout
                 success: (response) => {
                     console.log('Generation initiated:', response);
                     $('#debugInfo').html('<pre>Response: ' + JSON.stringify(response, null, 2) + '</pre>');
@@ -153,6 +175,7 @@ export const FormHandler = {
                         this.checkGenerationResult(response.result.id);
                     } else {
                         UIManager.showError('Failed to initiate comic generation: ' + (response.message || 'Unknown error'));
+                        UIManager.returnToStep(3);
                     }
                 },
                 error: (xhr, status, error) => {
@@ -163,16 +186,24 @@ export const FormHandler = {
                         headers: xhr.getAllResponseHeaders(),
                         state: xhr.readyState,
                         statusCode: xhr.status,
-                        statusText: xhr.statusText
+                        statusText: xhr.statusText,
+                        url: apiUrl
                     };
                     console.error('Generation failed:', errorDetails);
                     $('#debugInfo').html('<pre>Error Details:\n' + JSON.stringify(errorDetails, null, 2) + '</pre>');
                     UIManager.showError('Failed to connect to server: ' + (error || 'Unknown error'));
+                    UIManager.returnToStep(3);
                 },
                 beforeSend: (xhr) => {
-                    console.log('Sending request to:', 'api.php');
+                    console.log('Sending request to:', apiUrl);
                     console.log('Request data:', formData);
-                    $('#debugInfo').html('<p>Sending request to server...</p><pre>' + JSON.stringify(formData, null, 2) + '</pre>');
+                    $('#debugInfo').html(
+                        '<div class="alert alert-info">' +
+                        '<p>Sending request to server...</p>' +
+                        '<p>Endpoint: ' + apiUrl + '</p>' +
+                        '<pre>' + JSON.stringify(formData, null, 2) + '</pre>' +
+                        '</div>'
+                    );
                 }
             });
         });
