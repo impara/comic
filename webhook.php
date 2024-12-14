@@ -1,68 +1,110 @@
 <?php
 
+require_once __DIR__ . '/bootstrap.php';
 require_once __DIR__ . '/models/Config.php';
+require_once __DIR__ . '/interfaces/LoggerInterface.php';
 require_once __DIR__ . '/models/Logger.php';
 
-// Initialize logger and config
 $logger = new Logger();
 $config = Config::getInstance();
 
 try {
-    // Get the raw POST data and headers
-    $rawData = file_get_contents('php://input');
-    $signature = $_SERVER['HTTP_REPLICATE_WEBHOOK_SIGNATURE'] ?? null;
-    $timestamp = $_SERVER['HTTP_REPLICATE_WEBHOOK_TIMESTAMP'] ?? time();
+    // Get the webhook payload
+    $payload = file_get_contents('php://input');
+    $data = json_decode($payload, true);
 
-    // Get webhook secret from config
+    if (!$data) {
+        throw new Exception("Invalid JSON payload received");
+    }
+
+    // Check if we're in testing mode (no webhook secret configured)
     $webhookSecret = $config->get('replicate.webhook_secret');
-    if (!$webhookSecret) {
-        // For testing: Skip webhook secret verification
-        $logger->warning('Webhook secret not configured - TESTING MODE');
-        // In testing mode, don't require signature
-        $signature = $signature ?? 'test';
-    } else {
-        // Verify signature
-        $signedContent = $timestamp . '.' . $rawData;
-        $expectedSignature = hash_hmac('sha256', $signedContent, $webhookSecret);
+    $isTestingMode = empty($webhookSecret);
 
-        if (!hash_equals($expectedSignature, $signature)) {
-            throw new Exception('Invalid webhook signature');
+    if ($isTestingMode) {
+        $logger->warning("Running in TESTING MODE - webhook signature verification disabled");
+    } else {
+        // Production mode - verify signature
+        $signature = $_SERVER['HTTP_REPLICATE_WEBHOOK_SIGNATURE'] ?? '';
+        if (empty($signature)) {
+            throw new Exception("Missing webhook signature");
+        }
+
+        $computedSignature = hash_hmac('sha256', $payload, $webhookSecret);
+        if (!hash_equals($computedSignature, $signature)) {
+            throw new Exception("Invalid webhook signature");
+        }
+
+        $logger->info("Webhook signature verified successfully");
+    }
+
+    // Basic validation of the payload
+    if (empty($data['id']) || !isset($data['status'])) {
+        throw new Exception("Invalid webhook payload structure");
+    }
+
+    $logger->info("Received webhook from Replicate", [
+        'prediction_id' => $data['id'],
+        'status' => $data['status']
+    ]);
+
+    // Store the prediction result
+    $predictionId = $data['id'];
+    $tempFile = "/var/www/comic.amertech.online/public/temp/{$predictionId}.json";
+    file_put_contents($tempFile, $payload);
+
+    $logger->info("Stored prediction result", [
+        'file' => $tempFile,
+        'prediction_id' => $predictionId
+    ]);
+
+    // Check if this is a cartoonification completion
+    $pendingFiles = glob("/var/www/comic.amertech.online/public/temp/pending_*.json");
+    foreach ($pendingFiles as $pendingFile) {
+        $pending = json_decode(file_get_contents($pendingFile), true);
+        if ($pending && isset($pending['prediction_id']) && $pending['prediction_id'] === $predictionId) {
+            // Update the original image with the cartoonified version
+            if ($data['status'] === 'succeeded' && !empty($data['output'])) {
+                $logger->info("Updating cartoonified image", [
+                    'original' => $pending['original_image'],
+                    'cartoonified' => $data['output']
+                ]);
+
+                // Store the cartoonified URL for the original image
+                $cartoonifiedFile = "/var/www/comic.amertech.online/public/temp/cartoonified_" . basename($pending['original_image']) . ".json";
+                file_put_contents($cartoonifiedFile, json_encode([
+                    'original_url' => $pending['original_image'],
+                    'cartoonified_url' => $data['output'],
+                    'completed_at' => time()
+                ]));
+
+                // Clean up the pending file
+                unlink($pendingFile);
+                $logger->info("Cartoonification process completed successfully");
+            } elseif ($data['status'] === 'failed') {
+                $logger->error("Cartoonification failed", [
+                    'error' => $data['error'] ?? 'Unknown error',
+                    'original_image' => $pending['original_image']
+                ]);
+                unlink($pendingFile); // Clean up pending file even on failure
+            }
+            break;
         }
     }
 
-    $data = json_decode($rawData, true);
-    if (json_last_error() !== JSON_ERROR_NONE) {
-        throw new Exception('Invalid JSON payload');
-    }
-
-    $logger->info('Received webhook from Replicate', [
-        'data' => $data
+    http_response_code(200);
+    echo json_encode([
+        'status' => 'success',
+        'message' => 'Webhook processed successfully'
     ]);
-
-    // Verify this is a completed prediction
-    if ($data['status'] === 'succeeded') {
-        // Store the result in a temporary file
-        $resultFile = __DIR__ . '/public/temp/' . $data['id'] . '.json';
-        file_put_contents($resultFile, $rawData);
-
-        $logger->info('Stored prediction result', [
-            'file' => $resultFile,
-            'prediction_id' => $data['id']
-        ]);
-
-        // Return success response
-        http_response_code(200);
-        echo json_encode(['status' => 'success']);
-    } else {
-        $logger->warning('Received non-completed prediction', [
-            'status' => $data['status']
-        ]);
-        http_response_code(202); // Accepted but not processed
-    }
 } catch (Exception $e) {
-    $logger->error('Failed to process webhook', [
-        'error' => $e->getMessage()
+    $logger->error("Webhook processing failed", [
+        'error' => $e->getMessage(),
+        'trace' => $e->getTraceAsString()
     ]);
     http_response_code(500);
-    echo json_encode(['error' => $e->getMessage()]);
+    echo json_encode([
+        'status' => 'error',
+        'message' => $e->getMessage()
+    ]);
 }

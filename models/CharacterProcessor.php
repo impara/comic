@@ -151,7 +151,10 @@ class CharacterProcessor
     {
         try {
             // If the image is already cartoonified (from webhook), return it directly
-            if (strpos($imageData, '/public/generated/') !== false) {
+            if (
+                strpos($imageData, '/public/generated/') !== false ||
+                strpos($imageData, 'replicate.delivery') !== false
+            ) {
                 return $imageData;
             }
 
@@ -182,40 +185,19 @@ class CharacterProcessor
                 'final_url' => $finalUrl
             ]);
 
-            // Process through cartoonification
+            // Start cartoonification process - this will trigger webhook when done
             $prediction = $this->replicateClient->cartoonify($finalUrl);
-            $predictionId = $prediction['id'];
 
-            // Poll for result with timeout
-            $maxAttempts = 30; // 30 seconds timeout
-            $attempts = 0;
-            $result = null;
+            // Store the prediction ID for webhook processing
+            $tempFile = "/var/www/comic.amertech.online/public/temp/pending_" . basename($savedImagePath) . ".json";
+            file_put_contents($tempFile, json_encode([
+                'prediction_id' => $prediction['id'],
+                'original_image' => $finalUrl,
+                'created_at' => time()
+            ]));
 
-            while ($attempts < $maxAttempts) {
-                $this->logger->debug("Polling for result", [
-                    'attempt' => $attempts + 1,
-                    'prediction_id' => $predictionId
-                ]);
-
-                // Check if result exists in temp storage
-                $tempFile = "/var/www/comic.amertech.online/public/temp/{$predictionId}.json";
-                if (file_exists($tempFile)) {
-                    $storedResult = json_decode(file_get_contents($tempFile), true);
-                    if (isset($storedResult['output'])) {
-                        $result = $storedResult;
-                        break;
-                    }
-                }
-
-                sleep(1);
-                $attempts++;
-            }
-
-            if (!$result || !isset($result['output'])) {
-                throw new Exception("Cartoonification timed out or failed");
-            }
-
-            return $result['output'];
+            // Return the original image URL - it will be updated by webhook when processing completes
+            return $finalUrl;
         } catch (Exception $e) {
             $this->logger->error("Image processing failed", [
                 'error' => $e->getMessage(),
