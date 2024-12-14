@@ -80,7 +80,7 @@ export const FormHandler = {
 
             // Send the request to generate comic
             $.ajax({
-                url: 'api.php',
+                url: 'https://comic.amertech.online/api.php',
                 type: 'POST',
                 data: JSON.stringify(formData),
                 contentType: 'application/json',
