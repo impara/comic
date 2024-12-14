@@ -119,6 +119,15 @@ class Config
         return rtrim($path, '/') . '/';
     }
 
+    public function getTempPath(): string
+    {
+        $path = $this->get('paths.temp');
+        if (!$path) {
+            throw new RuntimeException('Temp directory not configured');
+        }
+        return rtrim($path, '/') . '/';
+    }
+
     public function getBaseUrl(): string
     {
         // Use APP_BASE_URL from the environment if set

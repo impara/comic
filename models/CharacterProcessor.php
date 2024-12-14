@@ -189,7 +189,7 @@ class CharacterProcessor
             $prediction = $this->replicateClient->cartoonify($finalUrl);
 
             // Store the prediction ID for webhook processing
-            $tempFile = "/var/www/comic.amertech.online/public/temp/pending_" . basename($savedImagePath) . ".json";
+            $tempFile = $this->config->getTempPath() . "pending_" . basename($savedImagePath) . ".json";
             file_put_contents($tempFile, json_encode([
                 'prediction_id' => $prediction['id'],
                 'original_image' => $finalUrl,

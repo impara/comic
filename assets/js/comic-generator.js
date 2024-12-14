@@ -150,45 +150,36 @@ export const ComicGenerator = {
     handleGenerationSuccess(response) {
         if (response.success) {
             console.log('Comic generation initiated:', response.result);
-            // Start polling for the result
-            this.pollForResult(response.result.id);
+            // Wait for a reasonable time then check once for the result
+            setTimeout(() => {
+                this.checkResult(response.result.id);
+            }, 30000); // Wait 30 seconds before checking
         } else {
             console.error('Comic generation returned error:', response.message);
             this.handleGenerationError(response.message);
         }
     },
 
-    pollForResult(predictionId) {
-        const pollInterval = 2000; // Poll every 2 seconds
-        let attempts = 0;
-        const maxAttempts = 60; // Maximum 2 minutes of polling
-
-        this.pollingInterval = setInterval(() => {
-            attempts++;
-
-            // Check if the result file exists
-            $.ajax({
-                url: this.getApiUrl(`public/temp/${predictionId}.json`),
-                type: 'GET',
-                success: (result) => {
-                    if (result.status === 'succeeded' && result.output) {
-                        clearInterval(this.pollingInterval);
-                        this.displayGeneratedComic(result);
-                    } else if (result.status === 'failed') {
-                        clearInterval(this.pollingInterval);
-                        this.handleGenerationError(result.error || 'Generation failed');
-                    }
-                },
-                error: (xhr) => {
-                    if (attempts >= maxAttempts) {
-                        clearInterval(this.pollingInterval);
-                        this.handleGenerationError('Timeout waiting for comic generation');
-                    }
-                    // On error, continue polling
-                    console.log('Polling attempt ' + attempts + ' failed, continuing...');
+    checkResult(predictionId) {
+        $.ajax({
+            url: this.getApiUrl(`public/temp/${predictionId}.json`),
+            type: 'GET',
+            success: (result) => {
+                if (result.status === 'succeeded' && result.output) {
+                    this.displayGeneratedComic(result);
+                } else if (result.status === 'failed') {
+                    this.handleGenerationError(result.error || 'Generation failed');
+                } else {
+                    // If still processing, try one more time after 15 seconds
+                    setTimeout(() => {
+                        this.checkResult(predictionId);
+                    }, 15000);
                 }
-            });
-        }, pollInterval);
+            },
+            error: (xhr) => {
+                this.handleGenerationError('Error checking comic generation status');
+            }
+        });
     },
 
     displayGeneratedComic(result) {

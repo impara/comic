@@ -61,7 +61,8 @@ return [
 
     'paths' => [
         'output' => __DIR__ . '/../public/generated',
-        'logs' => __DIR__ . '/../logs'
+        'logs' => __DIR__ . '/../logs',
+        'temp' => __DIR__ . '/../public/temp'
     ],
 
     'image' => [

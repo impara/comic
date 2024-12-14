@@ -50,7 +50,8 @@ try {
 
     // Store the prediction result
     $predictionId = $data['id'];
-    $tempFile = "/var/www/comic.amertech.online/public/temp/{$predictionId}.json";
+    $tempPath = $config->getTempPath();
+    $tempFile = $tempPath . "{$predictionId}.json";
     file_put_contents($tempFile, $payload);
 
     $logger->info("Stored prediction result", [
@@ -59,7 +60,7 @@ try {
     ]);
 
     // Check if this is a cartoonification completion
-    $pendingFiles = glob("/var/www/comic.amertech.online/public/temp/pending_*.json");
+    $pendingFiles = glob($tempPath . "pending_*.json");
     foreach ($pendingFiles as $pendingFile) {
         $pending = json_decode(file_get_contents($pendingFile), true);
         if ($pending && isset($pending['prediction_id']) && $pending['prediction_id'] === $predictionId) {
@@ -71,7 +72,7 @@ try {
                 ]);
 
                 // Store the cartoonified URL for the original image
-                $cartoonifiedFile = "/var/www/comic.amertech.online/public/temp/cartoonified_" . basename($pending['original_image']) . ".json";
+                $cartoonifiedFile = $tempPath . "cartoonified_" . basename($pending['original_image']) . ".json";
                 file_put_contents($cartoonifiedFile, json_encode([
                     'original_url' => $pending['original_image'],
                     'cartoonified_url' => $data['output'],

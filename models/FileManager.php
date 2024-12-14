@@ -184,26 +184,28 @@ class FileManager
     {
         $outputPath = $this->config->get('paths.output');
 
-        // If path is relative, make it absolute
+        // If path is relative, make it absolute using project root
         if (!str_starts_with($outputPath, '/')) {
-            $outputPath = '/var/www/comic.amertech.online/public/generated';
+            $outputPath = __DIR__ . '/../' . ltrim($outputPath, '/');
         }
 
         if (!file_exists($outputPath)) {
             if (!mkdir($outputPath, 0775, true)) {
                 throw new RuntimeException("Failed to create output directory: $outputPath");
             }
-            // Ensure www-data owns the directory
-            chown($outputPath, 'www-data');
-            chgrp($outputPath, 'www-data');
+            // Ensure proper permissions
+            if (function_exists('posix_getpwuid')) {
+                chown($outputPath, 'www-data');
+                chgrp($outputPath, 'www-data');
+            }
         }
 
         $this->logger->debug("Using output path", [
             'path' => $outputPath,
             'exists' => file_exists($outputPath),
             'writable' => is_writable($outputPath),
-            'owner' => posix_getpwuid(fileowner($outputPath))['name'],
-            'group' => posix_getgrgid(filegroup($outputPath))['name'],
+            'owner' => function_exists('posix_getpwuid') ? posix_getpwuid(fileowner($outputPath))['name'] : 'unknown',
+            'group' => function_exists('posix_getgrgid') ? posix_getgrgid(filegroup($outputPath))['name'] : 'unknown',
             'permissions' => substr(sprintf('%o', fileperms($outputPath)), -4)
         ]);
 
