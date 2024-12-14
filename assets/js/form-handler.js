@@ -55,13 +55,6 @@ export const FormHandler = {
 
         // Add Pay Now button handler
         $('#payButton').on('click', () => {
-            // Temporarily bypass payment for testing
-            console.log('Payment bypassed for testing');
-
-            // Move to generation step
-            UIManager.goToStep(4);
-            UIManager.showGeneratingState();
-
             // Prepare the form data
             const selectedCharacters = JSON.parse(sessionStorage.getItem('selectedCharacters') || '[]');
             const characterData = JSON.parse(sessionStorage.getItem('characterData') || '{}');
@@ -69,10 +62,6 @@ export const FormHandler = {
             const formData = {
                 characters: selectedCharacters.map(id => {
                     const charData = characterData[id];
-                    if (!charData) {
-                        console.error('Character data not found for ID:', id);
-                        return null;
-                    }
                     return {
                         id: charData.id,
                         name: charData.name,
@@ -83,127 +72,30 @@ export const FormHandler = {
                             style: sessionStorage.getItem('selectedStyle')
                         }
                     };
-                }).filter(char => char !== null),
+                }),
                 scene_description: JSON.parse(sessionStorage.getItem('userStory') || '""'),
                 art_style: sessionStorage.getItem('selectedStyle'),
                 background: sessionStorage.getItem('selectedBackground')
             };
 
-            // Log raw data for debugging
-            console.log('Raw session data:', {
-                selectedCharacters,
-                characterData,
-                userStory: sessionStorage.getItem('userStory'),
-                selectedStyle: sessionStorage.getItem('selectedStyle'),
-                selectedBackground: sessionStorage.getItem('selectedBackground')
-            });
-
-            // Validate data before sending
-            const validationErrors = [];
-
-            // Check story
-            if (!formData.scene_description) {
-                validationErrors.push('Story is missing');
-            }
-
-            // Check style
-            if (!formData.art_style) {
-                validationErrors.push('Art style is missing');
-            }
-
-            // Check background
-            if (!formData.background) {
-                validationErrors.push('Background is missing');
-            }
-
-            // Check characters
-            if (!formData.characters || formData.characters.length === 0) {
-                validationErrors.push('No characters selected');
-            } else {
-                // Validate each character
-                formData.characters.forEach((char, index) => {
-                    if (!char.image) {
-                        validationErrors.push(`Character ${index + 1} is missing image`);
-                    }
-                    if (!char.name) {
-                        validationErrors.push(`Character ${index + 1} is missing name`);
-                    }
-                });
-            }
-
-            // If there are validation errors, show them and stop
-            if (validationErrors.length > 0) {
-                const errorMessage = 'Validation errors:\n' + validationErrors.join('\n');
-                console.error(errorMessage);
-                $('#debugInfo').html('<pre class="text-danger">Error: ' + errorMessage + '</pre>');
-                UIManager.showError(errorMessage);
-                UIManager.returnToStep(3);
-                return;
-            }
-
-            // Log the actual data being sent
-            const requestDebug = {
-                formData,
-                sessionStorage: {
-                    userStory: sessionStorage.getItem('userStory'),
-                    parsedStory: JSON.parse(sessionStorage.getItem('userStory') || '""'),
-                    selectedStyle: sessionStorage.getItem('selectedStyle'),
-                    selectedBackground: sessionStorage.getItem('selectedBackground'),
-                    characterData: JSON.parse(sessionStorage.getItem('characterData') || '{}'),
-                    selectedCharacters: JSON.parse(sessionStorage.getItem('selectedCharacters') || '[]')
-                }
-            };
-            console.log('Debug - Full request context:', requestDebug);
-
-            // Get API URL
-            const apiUrl = new URL('api.php', window.location.href).href;
-            console.log('API URL:', apiUrl);
-
             // Send the request to generate comic
             $.ajax({
-                url: apiUrl,
+                url: 'api.php',
                 type: 'POST',
                 data: JSON.stringify(formData),
                 contentType: 'application/json',
-                dataType: 'json',
-                timeout: 30000, // 30 second timeout
                 success: (response) => {
-                    console.log('Generation initiated:', response);
-                    $('#debugInfo').html('<pre>Response: ' + JSON.stringify(response, null, 2) + '</pre>');
                     if (response.success) {
-                        // Start checking for results
+                        // Only move to generation step if API call succeeds
+                        UIManager.goToStep(4);
+                        UIManager.showGeneratingState();
                         this.checkGenerationResult(response.result.id);
                     } else {
-                        UIManager.showError('Failed to initiate comic generation: ' + (response.message || 'Unknown error'));
-                        UIManager.returnToStep(3);
+                        UIManager.showError(response.message || 'Failed to generate comic');
                     }
                 },
                 error: (xhr, status, error) => {
-                    const errorDetails = {
-                        status: status,
-                        error: error,
-                        response: xhr.responseText,
-                        headers: xhr.getAllResponseHeaders(),
-                        state: xhr.readyState,
-                        statusCode: xhr.status,
-                        statusText: xhr.statusText,
-                        url: apiUrl
-                    };
-                    console.error('Generation failed:', errorDetails);
-                    $('#debugInfo').html('<pre>Error Details:\n' + JSON.stringify(errorDetails, null, 2) + '</pre>');
-                    UIManager.showError('Failed to connect to server: ' + (error || 'Unknown error'));
-                    UIManager.returnToStep(3);
-                },
-                beforeSend: (xhr) => {
-                    console.log('Sending request to:', apiUrl);
-                    console.log('Request data:', formData);
-                    $('#debugInfo').html(
-                        '<div class="alert alert-info">' +
-                        '<p>Sending request to server...</p>' +
-                        '<p>Endpoint: ' + apiUrl + '</p>' +
-                        '<pre>' + JSON.stringify(formData, null, 2) + '</pre>' +
-                        '</div>'
-                    );
+                    UIManager.showError('Failed to connect to server');
                 }
             });
         });
