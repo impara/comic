@@ -1,4 +1,5 @@
 import { UIManager } from './ui-manager.js';
+import { ComicGenerator } from './comic-generator.js';
 
 export const FormHandler = {
     selectedStyle: null,
@@ -54,50 +55,13 @@ export const FormHandler = {
         $('#back-step-3').on('click', () => UIManager.goToStep(2));
 
         // Add Pay Now button handler
-        $('#payButton').on('click', () => {
-            // Prepare the form data
-            const selectedCharacters = JSON.parse(sessionStorage.getItem('selectedCharacters') || '[]');
-            const characterData = JSON.parse(sessionStorage.getItem('characterData') || '{}');
-
-            const formData = {
-                characters: selectedCharacters.map(id => {
-                    const charData = characterData[id];
-                    return {
-                        id: charData.id,
-                        name: charData.name,
-                        description: charData.name,
-                        image: charData.image,
-                        isCustom: true,
-                        options: {
-                            style: sessionStorage.getItem('selectedStyle')
-                        }
-                    };
-                }),
-                scene_description: JSON.parse(sessionStorage.getItem('userStory') || '""'),
-                art_style: sessionStorage.getItem('selectedStyle'),
-                background: sessionStorage.getItem('selectedBackground')
-            };
-
-            // Send the request to generate comic
-            $.ajax({
-                url: 'https://comic.amertech.online/api.php',
-                type: 'POST',
-                data: JSON.stringify(formData),
-                contentType: 'application/json',
-                success: (response) => {
-                    if (response.success) {
-                        // Only move to generation step if API call succeeds
-                        UIManager.goToStep(4);
-                        UIManager.showGeneratingState();
-                        this.checkGenerationResult(response.result.id);
-                    } else {
-                        UIManager.showError(response.message || 'Failed to generate comic');
-                    }
-                },
-                error: (xhr, status, error) => {
-                    UIManager.showError('Failed to connect to server');
-                }
-            });
+        $('#payButton').on('click', (e) => {
+            e.preventDefault();
+            // Move to generation step
+            UIManager.goToStep(4);
+            UIManager.showGeneratingState();
+            // Use the ComicGenerator to handle the generation
+            ComicGenerator.handleComicGeneration(e);
         });
     },
 
