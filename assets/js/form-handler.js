@@ -251,7 +251,8 @@ export const FormHandler = {
                         id: customCharId,
                         name: name,
                         image: resizedImage,
-                        isCustom: true
+                        isCustom: true,
+                        createdAt: new Date().toISOString()
                     };
 
                     console.log('Created custom character:', {
@@ -269,7 +270,16 @@ export const FormHandler = {
                     characterData[customCharId] = customChar;
                     sessionStorage.setItem('characterData', JSON.stringify(characterData));
 
-                    console.log('Updated session storage with character data');
+                    // Automatically select the new character
+                    if (this.selectedCharacters.length < this.maxCharacters) {
+                        this.selectedCharacters.push(customCharId);
+                        sessionStorage.setItem('selectedCharacters', JSON.stringify(this.selectedCharacters));
+                    }
+
+                    console.log('Updated session storage with character data:', {
+                        characterData: characterData,
+                        selectedCharacters: this.selectedCharacters
+                    });
 
                     // Update UI
                     this.initializeCharacterGrid();

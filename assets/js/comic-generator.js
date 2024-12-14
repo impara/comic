@@ -26,18 +26,46 @@ export const ComicGenerator = {
         e.preventDefault();
         console.log('Comic generation started');
 
+        // Get story and style from session storage
+        const userStory = sessionStorage.getItem('userStory');
+        const selectedStyle = sessionStorage.getItem('selectedStyle');
+        const selectedCharacterIds = JSON.parse(sessionStorage.getItem('selectedCharacters') || '[]');
+
+        console.log('Retrieved from session storage:', {
+            userStory: userStory,
+            selectedStyle: selectedStyle,
+            selectedCharacterIds: selectedCharacterIds
+        });
+
+        if (!userStory || !selectedStyle || !selectedCharacterIds.length) {
+            console.error('Missing required data:', {
+                hasStory: !!userStory,
+                hasStyle: !!selectedStyle,
+                characterCount: selectedCharacterIds.length
+            });
+            this.handleGenerationError('Please complete all required steps before generating the comic.');
+            return;
+        }
+
         // Get custom character data
         const characterData = JSON.parse(sessionStorage.getItem('characterData') || '{}');
         console.log('Retrieved character data from session:', characterData);
 
-        // Create array of character details from custom uploads
-        const characters = Object.values(characterData).map(char => {
+        // Create array of character details from selected characters
+        const characters = selectedCharacterIds.map(id => {
+            const char = characterData[id];
+            if (!char) {
+                console.error('Character not found:', id);
+                return null;
+            }
+
             // Ensure image URL is complete
             let imageUrl = char.image;
             if (imageUrl && !imageUrl.startsWith('data:') && !imageUrl.startsWith('http')) {
                 // Convert relative URLs to absolute
                 imageUrl = new URL(imageUrl, window.location.origin).href;
             }
+
             return {
                 id: char.id,
                 name: char.name,
@@ -45,27 +73,18 @@ export const ComicGenerator = {
                 image: imageUrl,
                 isCustom: true,
                 options: {
-                    style: sessionStorage.getItem('selectedStyle')
+                    style: selectedStyle
                 }
             };
-        });
+        }).filter(char => char !== null);
 
         console.log('Processed characters:', characters);
 
         if (characters.length === 0) {
-            console.error('No characters found in session storage');
+            console.error('No valid characters found');
             this.handleGenerationError('Please upload at least one custom character before generating the comic.');
             return;
         }
-
-        // Get story and style from session storage
-        const userStory = sessionStorage.getItem('userStory');
-        const selectedStyle = sessionStorage.getItem('selectedStyle');
-
-        console.log('Retrieved from session storage:', {
-            userStory: userStory,
-            selectedStyle: selectedStyle
-        });
 
         // Collect form data
         const formData = {
