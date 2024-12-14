@@ -125,6 +125,9 @@ export const ComicGenerator = {
         const apiUrl = this.getApiUrl('api.php');
         console.log('Sending POST request to:', apiUrl);
 
+        // Add loading indicator to UI
+        $('#debugInfo').html('<p>Sending request to server...</p>');
+
         $.ajax({
             url: apiUrl,
             type: 'POST',
@@ -133,16 +136,41 @@ export const ComicGenerator = {
             dataType: 'json',
             success: (response) => {
                 console.log('Comic generation response:', response);
+                $('#debugInfo').html('<pre>Response: ' + JSON.stringify(response, null, 2) + '</pre>');
                 this.handleGenerationSuccess(response);
             },
             error: (xhr, status, error) => {
-                console.error('Comic generation failed:', {
+                // Enhanced error logging
+                const errorDetails = {
                     status: status,
                     error: error,
                     response: xhr.responseText,
-                    headers: xhr.getAllResponseHeaders()
-                });
-                this.handleGenerationError(xhr.responseText || error);
+                    headers: xhr.getAllResponseHeaders(),
+                    state: xhr.readyState,
+                    statusCode: xhr.status,
+                    statusText: xhr.statusText
+                };
+                console.error('Comic generation failed:', errorDetails);
+
+                // Show error details in UI
+                $('#debugInfo').html('<pre>Error: ' + JSON.stringify(errorDetails, null, 2) + '</pre>');
+
+                // Try to parse response text if it's JSON
+                let errorMessage = error;
+                try {
+                    const errorResponse = JSON.parse(xhr.responseText);
+                    errorMessage = errorResponse.message || errorResponse.error || error;
+                } catch (e) {
+                    errorMessage = xhr.responseText || error;
+                }
+
+                this.handleGenerationError(errorMessage);
+            },
+            // Add timeout
+            timeout: 30000, // 30 seconds
+            // Add request state logging
+            beforeSend: (xhr) => {
+                console.log('Sending request with headers:', xhr.getAllResponseHeaders());
             }
         });
     },
