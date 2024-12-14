@@ -55,10 +55,54 @@ export const FormHandler = {
 
         // Add Pay Now button handler
         $('#payButton').on('click', () => {
-            $('html, body').animate({
-                scrollTop: $('.wizard-container').offset().top - 50
-            }, 500, () => {
-                UIManager.showGeneratingState();
+            // Temporarily bypass payment for testing
+            console.log('Payment bypassed for testing');
+
+            // Move to generation step
+            UIManager.goToStep(4);
+            UIManager.showGeneratingState();
+
+            // Prepare the form data
+            const formData = {
+                characters: this.selectedCharacters.map(id => {
+                    const charData = JSON.parse(sessionStorage.getItem('characterData') || '{}')[id];
+                    return {
+                        id: charData.id,
+                        name: charData.name,
+                        description: charData.name,
+                        image: charData.image,
+                        isCustom: true,
+                        options: {
+                            style: this.selectedStyle
+                        }
+                    };
+                }),
+                scene_description: $('#story-input').val(),
+                art_style: this.selectedStyle,
+                background: this.selectedBackground
+            };
+
+            console.log('Sending data for comic generation:', formData);
+
+            // Send the request to generate comic
+            $.ajax({
+                url: 'api.php',
+                type: 'POST',
+                data: JSON.stringify(formData),
+                contentType: 'application/json',
+                success: (response) => {
+                    console.log('Generation initiated:', response);
+                    if (response.success) {
+                        // Start checking for results
+                        this.checkGenerationResult(response.result.id);
+                    } else {
+                        UIManager.showError('Failed to initiate comic generation');
+                    }
+                },
+                error: (xhr, status, error) => {
+                    console.error('Generation failed:', error);
+                    UIManager.showError('Failed to connect to server');
+                }
             });
         });
     },
@@ -1031,5 +1075,62 @@ export const FormHandler = {
 
         // Then check in default characters
         return this.characters.find(c => c.id === charId);
+    },
+
+    checkGenerationResult(predictionId) {
+        console.log('Checking result for prediction:', predictionId);
+
+        // First check after 30 seconds
+        setTimeout(() => {
+            this.doResultCheck(predictionId);
+        }, 30000);
+    },
+
+    doResultCheck(predictionId) {
+        $.ajax({
+            url: `public/temp/${predictionId}.json`,
+            type: 'GET',
+            success: (result) => {
+                console.log('Result check response:', result);
+                if (result.status === 'succeeded' && result.output) {
+                    this.displayGeneratedComic(result);
+                } else if (result.status === 'failed') {
+                    UIManager.showError(result.error || 'Generation failed');
+                } else {
+                    // If still processing, try one more time after 15 seconds
+                    setTimeout(() => {
+                        this.doResultCheck(predictionId);
+                    }, 15000);
+                }
+            },
+            error: (xhr) => {
+                console.error('Error checking result:', xhr);
+                UIManager.showError('Error checking generation status');
+            }
+        });
+    },
+
+    displayGeneratedComic(result) {
+        UIManager.hideGeneratingState();
+
+        if (result && result.output) {
+            // Validate and sanitize URL
+            const comicUrl = result.output;
+            const isAbsoluteUrl = comicUrl.startsWith('http://') || comicUrl.startsWith('https://');
+            const sanitizedUrl = isAbsoluteUrl ? comicUrl : window.location.origin + comicUrl;
+
+            // Display the comic
+            $('.comic-preview').html(
+                `<img src="${sanitizedUrl}" class="img-fluid mb-4" alt="Generated Comic">`
+            );
+
+            // Enable action buttons
+            $('.action-buttons button').prop('disabled', false);
+
+            // Show completion status
+            UIManager.showCompletionState();
+        } else {
+            UIManager.showError('Comic generation completed but no output URL found');
+        }
     }
 }; 
