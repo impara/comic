@@ -183,9 +183,26 @@ class FileManager
     private function getOutputPath(): string
     {
         $outputPath = $this->config->get('paths.output');
+
+        // Convert relative path to absolute if needed
+        if (!str_starts_with($outputPath, '/')) {
+            $outputPath = realpath(__DIR__ . '/../' . $outputPath);
+        }
+
+        if (!$outputPath) {
+            throw new RuntimeException('Invalid output path configuration');
+        }
+
         if (!file_exists($outputPath)) {
             mkdir($outputPath, 0755, true);
         }
+
+        $this->logger->debug("Using output path", [
+            'path' => $outputPath,
+            'exists' => file_exists($outputPath),
+            'writable' => is_writable($outputPath)
+        ]);
+
         return $outputPath;
     }
 }

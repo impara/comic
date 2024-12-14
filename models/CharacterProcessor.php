@@ -155,6 +155,11 @@ class CharacterProcessor
                 return $imageData;
             }
 
+            $this->logger->info("Cartoonifying image", [
+                'image_length' => strlen($imageData),
+                'options' => []
+            ]);
+
             // Save the image first
             $savedImagePath = '';
             if (filter_var($imageData, FILTER_VALIDATE_URL)) {
@@ -165,8 +170,20 @@ class CharacterProcessor
                 throw new Exception("Invalid image data format");
             }
 
+            // Convert saved path to URL
+            $baseUrl = $this->config->getBaseUrl();
+            $publicPath = str_replace('/var/www/comic.amertech.online/public/', '', $savedImagePath);
+            $finalUrl = $baseUrl . '/public/' . $publicPath;
+
+            $this->logger->info("Constructed image URL", [
+                'original_path' => $savedImagePath,
+                'public_path' => $publicPath,
+                'base_url' => $baseUrl,
+                'final_url' => $finalUrl
+            ]);
+
             // Process through cartoonification
-            $result = $this->replicateClient->cartoonify($savedImagePath);
+            $result = $this->replicateClient->cartoonify($finalUrl);
 
             if (!isset($result['output'])) {
                 throw new Exception("Failed to process character image");
@@ -177,7 +194,7 @@ class CharacterProcessor
             $this->logger->error("Image processing failed", [
                 'error' => $e->getMessage()
             ]);
-            throw $e;
+            throw new Exception("Failed to process character image");
         }
     }
 }
