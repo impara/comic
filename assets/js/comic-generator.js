@@ -11,10 +11,18 @@ export const ComicGenerator = {
     handleGenerationSuccess(response) {
         if (response.success) {
             console.log('Comic generation initiated:', response.result);
-            // Wait for a reasonable time then check once for the result
-            setTimeout(() => {
-                this.checkResult(response.result.id);
-            }, 30000); // Wait 30 seconds before checking
+            // Start checking for results immediately
+            this.checkResult(response.result.id);
+
+            // Update UI to show progress
+            $('#debugInfo').html(`
+                <p>Generation started successfully</p>
+                <p>Prediction ID: ${response.result.id}</p>
+                <p>Status: Checking for results...</p>
+            `);
+
+            // Update progress bar
+            $('.progress-bar').css('width', '25%');
         } else {
             console.error('Comic generation returned error:', response.message);
             this.handleGenerationError(response.message);
@@ -183,40 +191,55 @@ export const ComicGenerator = {
     },
 
     checkResult(predictionId) {
+        console.log('Checking result for prediction:', predictionId);
         $.ajax({
             url: this.getApiUrl(`public/temp/${predictionId}.json`),
             type: 'GET',
             success: (result) => {
+                console.log('Result check response:', result);
                 if (result.status === 'succeeded' && result.output) {
                     this.displayGeneratedComic(result);
                 } else if (result.status === 'failed') {
+                    console.error('Generation failed:', result.error);
                     this.handleGenerationError(result.error || 'Generation failed');
                 } else {
-                    // If still processing, try one more time after 15 seconds
+                    // If still processing, check again after 5 seconds
+                    console.log('Still processing, checking again in 5 seconds');
                     setTimeout(() => {
                         this.checkResult(predictionId);
-                    }, 15000);
+                    }, 5000);
                 }
             },
-            error: (xhr) => {
-                this.handleGenerationError('Error checking comic generation status');
+            error: (xhr, status, error) => {
+                console.error('Error checking result:', error);
+                // If file not found, it might not be created yet, try again
+                if (xhr.status === 404) {
+                    console.log('Result file not found yet, retrying in 5 seconds');
+                    setTimeout(() => {
+                        this.checkResult(predictionId);
+                    }, 5000);
+                } else {
+                    this.handleGenerationError('Error checking comic generation status');
+                }
             }
         });
     },
 
     displayGeneratedComic(result) {
+        console.log('Displaying generated comic:', result);
+
+        // Update progress bar to 100%
+        $('.progress-bar').css('width', '100%');
+
         UIManager.hideGeneratingState(() => {
             if (result && result.output) {
                 // Validate and sanitize URL
                 const comicUrl = result.output;
-                const isAbsoluteUrl = comicUrl.startsWith('http://') || comicUrl.startsWith('https://');
-                const sanitizedUrl = isAbsoluteUrl
-                    ? comicUrl
-                    : window.location.origin + comicUrl;
+                console.log('Comic URL:', comicUrl);
 
                 // Display the comic
                 $('.comic-preview').html(
-                    `<img src="${sanitizedUrl}" class="img-fluid mb-4" alt="Generated Comic">`
+                    `<img src="${comicUrl}" class="img-fluid mb-4" alt="Generated Comic" onerror="this.onerror=null; this.src='assets/images/error.png'; console.error('Failed to load comic image');">`
                 );
 
                 // Enable action buttons
@@ -224,7 +247,14 @@ export const ComicGenerator = {
 
                 // Show completion status
                 UIManager.showCompletionState();
+
+                // Update debug info
+                $('#debugInfo').html(`
+                    <p>Comic generation completed successfully!</p>
+                    <p>Image URL: ${comicUrl}</p>
+                `);
             } else {
+                console.error('No output URL in result:', result);
                 this.handleGenerationError('Comic generation completed but no output URL found');
             }
         });
