@@ -102,8 +102,9 @@ class ComicController
                 if (
                     !preg_match('/^data:image\/(\w+);base64,/', $character['image'])
                     && !filter_var($character['image'], FILTER_VALIDATE_URL)
+                    && strpos($character['image'], '/public/generated/') === false
                 ) {
-                    throw new RuntimeException("Character image at index $index must be base64 encoded or a valid URL");
+                    throw new RuntimeException("Character image at index $index must be base64 encoded, a valid URL, or a generated image path");
                 }
             }
         }

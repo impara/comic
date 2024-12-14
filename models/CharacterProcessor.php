@@ -23,7 +23,7 @@ class CharacterProcessor
         $this->replicateClient = new ReplicateClient($logger);
         $this->promptBuilder = new PromptBuilder();
         $this->imageComposer = new ImageComposer($logger);
-        $this->fileManager = new FileManager($logger);
+        $this->fileManager = FileManager::getInstance($logger);
     }
 
     /**
@@ -150,6 +150,11 @@ class CharacterProcessor
     private function processImage(string $imageData): string
     {
         try {
+            // If the image is already cartoonified (from webhook), return it directly
+            if (strpos($imageData, '/public/generated/') !== false) {
+                return $imageData;
+            }
+
             // Save the image first
             $savedImagePath = '';
             if (filter_var($imageData, FILTER_VALIDATE_URL)) {
