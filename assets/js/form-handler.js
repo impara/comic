@@ -77,12 +77,67 @@ export const FormHandler = {
                         }
                     };
                 }),
-                scene_description: sessionStorage.getItem('userStory'),
+                scene_description: JSON.parse(sessionStorage.getItem('userStory') || '""'),
                 art_style: sessionStorage.getItem('selectedStyle'),
                 background: sessionStorage.getItem('selectedBackground')
             };
 
-            console.log('Sending data for comic generation:', formData);
+            // Validate data before sending
+            const validationErrors = [];
+
+            // Check story
+            if (!formData.scene_description) {
+                validationErrors.push('Story is missing');
+            }
+
+            // Check style
+            if (!formData.art_style) {
+                validationErrors.push('Art style is missing');
+            }
+
+            // Check background
+            if (!formData.background) {
+                validationErrors.push('Background is missing');
+            }
+
+            // Check characters
+            if (!formData.characters || formData.characters.length === 0) {
+                validationErrors.push('No characters selected');
+            } else {
+                // Validate each character
+                formData.characters.forEach((char, index) => {
+                    if (!char.image) {
+                        validationErrors.push(`Character ${index + 1} is missing image`);
+                    }
+                    if (!char.name) {
+                        validationErrors.push(`Character ${index + 1} is missing name`);
+                    }
+                });
+            }
+
+            // If there are validation errors, show them and stop
+            if (validationErrors.length > 0) {
+                const errorMessage = 'Validation errors:\n' + validationErrors.join('\n');
+                console.error(errorMessage);
+                $('#debugInfo').html('<pre class="text-danger">Error: ' + errorMessage + '</pre>');
+                UIManager.showError(errorMessage);
+                UIManager.returnToStep(3);
+                return;
+            }
+
+            // Log the actual data being sent
+            const requestDebug = {
+                formData,
+                sessionStorage: {
+                    userStory: sessionStorage.getItem('userStory'),
+                    parsedStory: JSON.parse(sessionStorage.getItem('userStory') || '""'),
+                    selectedStyle: sessionStorage.getItem('selectedStyle'),
+                    selectedBackground: sessionStorage.getItem('selectedBackground'),
+                    characterData: JSON.parse(sessionStorage.getItem('characterData') || '{}'),
+                    selectedCharacters: JSON.parse(sessionStorage.getItem('selectedCharacters') || '[]')
+                }
+            };
+            console.log('Debug - Full request context:', requestDebug);
 
             // Send the request to generate comic
             $.ajax({
