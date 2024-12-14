@@ -1,6 +1,7 @@
 import storyExamples from './story-examples.js';
 import { UIManager } from './ui-manager.js';
 import { FormHandler } from './form-handler.js';
+import { ComicGenerator } from './comic-generator.js';
 
 $(document).ready(function () {
     // Initialize form handler
@@ -12,6 +13,9 @@ $(document).ready(function () {
     // Initialize UI manager
     UIManager.initializeSteps();
     UIManager.updatePreview(FormHandler);
+
+    // Initialize comic generator
+    ComicGenerator.init();
 
     // Initialize example prompts
     initializeExamplePrompts();

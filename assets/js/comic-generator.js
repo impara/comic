@@ -2,16 +2,23 @@ import { UIManager } from './ui-manager.js';
 
 export const ComicGenerator = {
     init() {
-        this.bindEvents();
         // Get base path from current page location
         this.basePath = new URL('.', window.location.href).pathname;
         this.pollingInterval = null;
         console.log('ComicGenerator initialized with base path:', this.basePath);
     },
 
-    bindEvents() {
-        $('#payButton').on('click', (e) => this.handleComicGeneration(e));
-        console.log('ComicGenerator events bound');
+    handleGenerationSuccess(response) {
+        if (response.success) {
+            console.log('Comic generation initiated:', response.result);
+            // Wait for a reasonable time then check once for the result
+            setTimeout(() => {
+                this.checkResult(response.result.id);
+            }, 30000); // Wait 30 seconds before checking
+        } else {
+            console.error('Comic generation returned error:', response.message);
+            this.handleGenerationError(response.message);
+        }
     },
 
     getApiUrl(endpoint) {
@@ -173,19 +180,6 @@ export const ComicGenerator = {
                 console.log('Sending request with headers:', xhr.getAllResponseHeaders());
             }
         });
-    },
-
-    handleGenerationSuccess(response) {
-        if (response.success) {
-            console.log('Comic generation initiated:', response.result);
-            // Wait for a reasonable time then check once for the result
-            setTimeout(() => {
-                this.checkResult(response.result.id);
-            }, 30000); // Wait 30 seconds before checking
-        } else {
-            console.error('Comic generation returned error:', response.message);
-            this.handleGenerationError(response.message);
-        }
     },
 
     checkResult(predictionId) {
