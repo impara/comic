@@ -73,13 +73,13 @@ export const FormHandler = {
                         image: charData.image,
                         isCustom: true,
                         options: {
-                            style: this.selectedStyle
+                            style: sessionStorage.getItem('selectedStyle')
                         }
                     };
                 }),
-                scene_description: $('#story-input').val(),
-                art_style: this.selectedStyle,
-                background: this.selectedBackground
+                scene_description: sessionStorage.getItem('userStory'),
+                art_style: sessionStorage.getItem('selectedStyle'),
+                background: sessionStorage.getItem('selectedBackground')
             };
 
             console.log('Sending data for comic generation:', formData);
@@ -92,16 +92,32 @@ export const FormHandler = {
                 contentType: 'application/json',
                 success: (response) => {
                     console.log('Generation initiated:', response);
+                    $('#debugInfo').html('<pre>Response: ' + JSON.stringify(response, null, 2) + '</pre>');
                     if (response.success) {
                         // Start checking for results
                         this.checkGenerationResult(response.result.id);
                     } else {
-                        UIManager.showError('Failed to initiate comic generation');
+                        UIManager.showError('Failed to initiate comic generation: ' + (response.message || 'Unknown error'));
                     }
                 },
                 error: (xhr, status, error) => {
-                    console.error('Generation failed:', error);
-                    UIManager.showError('Failed to connect to server');
+                    const errorDetails = {
+                        status: status,
+                        error: error,
+                        response: xhr.responseText,
+                        headers: xhr.getAllResponseHeaders(),
+                        state: xhr.readyState,
+                        statusCode: xhr.status,
+                        statusText: xhr.statusText
+                    };
+                    console.error('Generation failed:', errorDetails);
+                    $('#debugInfo').html('<pre>Error Details:\n' + JSON.stringify(errorDetails, null, 2) + '</pre>');
+                    UIManager.showError('Failed to connect to server: ' + (error || 'Unknown error'));
+                },
+                beforeSend: (xhr) => {
+                    console.log('Sending request to:', 'api.php');
+                    console.log('Request data:', formData);
+                    $('#debugInfo').html('<p>Sending request to server...</p><pre>' + JSON.stringify(formData, null, 2) + '</pre>');
                 }
             });
         });
