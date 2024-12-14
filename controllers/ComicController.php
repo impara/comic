@@ -24,6 +24,9 @@ class ComicController
     {
         // Only accept POST requests
         if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            $this->logger->error('Invalid request method', [
+                'method' => $_SERVER['REQUEST_METHOD']
+            ]);
             http_response_code(405);
             echo json_encode([
                 'success' => false,
@@ -33,8 +36,18 @@ class ComicController
         }
 
         // Get JSON input
-        $input = json_decode(file_get_contents('php://input'), true);
+        $rawInput = file_get_contents('php://input');
+        $this->logger->info('Received request', [
+            'raw_input_length' => strlen($rawInput),
+            'content_type' => $_SERVER['CONTENT_TYPE'] ?? 'not set'
+        ]);
+
+        $input = json_decode($rawInput, true);
         if (!$input) {
+            $this->logger->error('Invalid JSON input', [
+                'json_error' => json_last_error_msg(),
+                'raw_input' => substr($rawInput, 0, 1000) // Log first 1000 chars
+            ]);
             http_response_code(400);
             echo json_encode([
                 'success' => false,
@@ -45,6 +58,14 @@ class ComicController
 
         // Handle comic generation
         try {
+            $this->logger->info('Processing comic generation request', [
+                'input' => [
+                    'character_count' => count($input['characters'] ?? []),
+                    'scene_description_length' => strlen($input['scene_description'] ?? ''),
+                    'art_style' => $input['art_style'] ?? 'not set'
+                ]
+            ]);
+
             // Validate input
             $this->validateInput($input);
 
@@ -53,6 +74,10 @@ class ComicController
                 $input['characters'],
                 $input['scene_description']
             );
+
+            $this->logger->info('Comic generation successful', [
+                'result' => $result
+            ]);
 
             // Return the result
             echo json_encode([
@@ -63,7 +88,8 @@ class ComicController
         } catch (Exception $e) {
             $this->logger->error('Comic generation failed', [
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'trace' => $e->getTraceAsString(),
+                'input' => $input ?? null
             ]);
 
             http_response_code(400);
@@ -81,6 +107,12 @@ class ComicController
      */
     private function validateInput(array $input): void
     {
+        $this->logger->info('Validating input', [
+            'has_characters' => isset($input['characters']),
+            'has_scene' => isset($input['scene_description']),
+            'has_style' => isset($input['art_style'])
+        ]);
+
         if (!isset($input['characters']) || !is_array($input['characters'])) {
             throw new RuntimeException('Characters array is required');
         }
@@ -89,11 +121,16 @@ class ComicController
             throw new RuntimeException('At least one character is required');
         }
 
-        if (!isset($input['scene_description']) || empty($input['scene_description'])) {
-            throw new RuntimeException('Scene description is required');
-        }
-
         foreach ($input['characters'] as $index => $character) {
+            $this->logger->info('Validating character', [
+                'index' => $index,
+                'has_description' => isset($character['description']),
+                'has_image' => isset($character['image']),
+                'image_type' => isset($character['image']) ? (
+                    strpos($character['image'], 'data:image') === 0 ? 'base64' : (filter_var($character['image'], FILTER_VALIDATE_URL) ? 'url' : 'unknown')
+                ) : 'none'
+            ]);
+
             if (!isset($character['description']) && !isset($character['image'])) {
                 throw new RuntimeException("Character at index $index must have either description or image");
             }
@@ -108,5 +145,11 @@ class ComicController
                 }
             }
         }
+
+        if (!isset($input['scene_description']) || empty($input['scene_description'])) {
+            throw new RuntimeException('Scene description is required');
+        }
+
+        $this->logger->info('Input validation successful');
     }
 }

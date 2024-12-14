@@ -6,23 +6,29 @@ export const ComicGenerator = {
         // Get base path from current page location
         this.basePath = new URL('.', window.location.href).pathname;
         this.pollingInterval = null;
+        console.log('ComicGenerator initialized with base path:', this.basePath);
     },
 
     bindEvents() {
         $('#payButton').on('click', (e) => this.handleComicGeneration(e));
+        console.log('ComicGenerator events bound');
     },
 
     getApiUrl(endpoint) {
         // Ensure endpoint has no leading slash and combine with base path
         endpoint = endpoint.replace(/^\/+/, '');
-        return new URL(endpoint, window.location.href).href;
+        const url = new URL(endpoint, window.location.href).href;
+        console.log('Generated API URL:', url);
+        return url;
     },
 
     handleComicGeneration(e) {
         e.preventDefault();
+        console.log('Comic generation started');
 
         // Get custom character data
         const characterData = JSON.parse(sessionStorage.getItem('characterData') || '{}');
+        console.log('Retrieved character data from session:', characterData);
 
         // Create array of character details from custom uploads
         const characters = Object.values(characterData).map(char => {
@@ -44,16 +50,28 @@ export const ComicGenerator = {
             };
         });
 
+        console.log('Processed characters:', characters);
+
         if (characters.length === 0) {
+            console.error('No characters found in session storage');
             this.handleGenerationError('Please upload at least one custom character before generating the comic.');
             return;
         }
 
+        // Get story and style from session storage
+        const userStory = sessionStorage.getItem('userStory');
+        const selectedStyle = sessionStorage.getItem('selectedStyle');
+
+        console.log('Retrieved from session storage:', {
+            userStory: userStory,
+            selectedStyle: selectedStyle
+        });
+
         // Collect form data
         const formData = {
             characters: characters,
-            scene_description: sessionStorage.getItem('userStory'),
-            art_style: sessionStorage.getItem('selectedStyle')
+            scene_description: userStory,
+            art_style: selectedStyle
         };
 
         console.log('Sending comic generation data:', formData);
@@ -81,11 +99,15 @@ export const ComicGenerator = {
         console.log('Initiating comic generation with data:', {
             story_length: formData.scene_description?.length,
             art_style: formData.art_style,
-            character_count: formData.characters?.length
+            character_count: formData.characters?.length,
+            characters: formData.characters
         });
 
+        const apiUrl = this.getApiUrl('api.php');
+        console.log('Sending POST request to:', apiUrl);
+
         $.ajax({
-            url: this.getApiUrl('api.php'),
+            url: apiUrl,
             type: 'POST',
             data: JSON.stringify(formData),
             contentType: 'application/json',
@@ -98,7 +120,8 @@ export const ComicGenerator = {
                 console.error('Comic generation failed:', {
                     status: status,
                     error: error,
-                    response: xhr.responseText
+                    response: xhr.responseText,
+                    headers: xhr.getAllResponseHeaders()
                 });
                 this.handleGenerationError(xhr.responseText || error);
             }

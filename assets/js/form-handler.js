@@ -195,6 +195,12 @@ export const FormHandler = {
     handleCharacterImagePreview(e) {
         const file = e.target.files[0];
         if (file) {
+            console.log('Processing character image:', {
+                name: file.name,
+                type: file.type,
+                size: file.size
+            });
+
             // Validate file
             if (!['image/jpeg', 'image/png', 'image/jpg'].includes(file.type)) {
                 alert('Please upload only PNG or JPEG images.');
@@ -210,8 +216,14 @@ export const FormHandler = {
             // Preview image with consistent dimensions
             const reader = new FileReader();
             reader.onload = (e) => {
+                console.log('Image loaded into FileReader');
                 const img = new Image();
                 img.onload = () => {
+                    console.log('Image loaded for processing:', {
+                        width: img.width,
+                        height: img.height
+                    });
+
                     const canvas = document.createElement('canvas');
                     const ctx = canvas.getContext('2d');
                     canvas.width = 512;  // Standard size for AI models
@@ -242,6 +254,12 @@ export const FormHandler = {
                         isCustom: true
                     };
 
+                    console.log('Created custom character:', {
+                        id: customCharId,
+                        name: name,
+                        imageLength: resizedImage.length
+                    });
+
                     // Add to characters array and update storage
                     this.characters.push(customChar);
                     this.customCharacters.push(customChar);
@@ -251,31 +269,20 @@ export const FormHandler = {
                     characterData[customCharId] = customChar;
                     sessionStorage.setItem('characterData', JSON.stringify(characterData));
 
-                    // Update preview
-                    $('#characterPreview img').attr('src', resizedImage);
-                    $('#characterPreview .preview-name').text(name);
+                    console.log('Updated session storage with character data');
 
-                    // Add to character grid
-                    $('#characterGrid').append(`
-                        <div class="col-4 col-md-2">
-                            <div class="character-option p-2" data-character-id="${customCharId}">
-                                <img src="${resizedImage}" class="img-fluid rounded" alt="${name}">
-                                <div class="text-center mt-2">${name}</div>
-                                <div class="selected-overlay">
-                                    <i class="fas fa-check-circle"></i>
-                                </div>
-                            </div>
-                        </div>
-                    `);
+                    // Update UI
+                    this.initializeCharacterGrid();
+                    this.updateFormState();
+                    this.updateLivePreview();
 
-                    // Clear the file input for next use
+                    // Clear the file input
                     $('#characterImage').val('');
+                    $('#characterName').val('');
                 };
                 img.src = e.target.result;
             };
             reader.readAsDataURL(file);
-        } else {
-            this.resetCharacterPreview();
         }
     },
 
