@@ -172,12 +172,16 @@ class CharacterProcessor
 
             // Convert saved path to URL
             $baseUrl = $this->config->getBaseUrl();
-            $publicPath = str_replace('/var/www/comic.amertech.online/public/', '', $savedImagePath);
-            $finalUrl = $baseUrl . '/public/' . $publicPath;
+
+            // Extract the filename from the saved path
+            $filename = basename($savedImagePath);
+
+            // Construct the public URL
+            $finalUrl = $baseUrl . '/public/generated/' . $filename;
 
             $this->logger->info("Constructed image URL", [
                 'original_path' => $savedImagePath,
-                'public_path' => $publicPath,
+                'filename' => $filename,
                 'base_url' => $baseUrl,
                 'final_url' => $finalUrl
             ]);

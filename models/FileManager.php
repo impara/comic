@@ -184,23 +184,27 @@ class FileManager
     {
         $outputPath = $this->config->get('paths.output');
 
-        // Convert relative path to absolute if needed
+        // If path is relative, make it absolute
         if (!str_starts_with($outputPath, '/')) {
-            $outputPath = realpath(__DIR__ . '/../' . $outputPath);
-        }
-
-        if (!$outputPath) {
-            throw new RuntimeException('Invalid output path configuration');
+            $outputPath = '/var/www/comic.amertech.online/public/generated';
         }
 
         if (!file_exists($outputPath)) {
-            mkdir($outputPath, 0755, true);
+            if (!mkdir($outputPath, 0775, true)) {
+                throw new RuntimeException("Failed to create output directory: $outputPath");
+            }
+            // Ensure www-data owns the directory
+            chown($outputPath, 'www-data');
+            chgrp($outputPath, 'www-data');
         }
 
         $this->logger->debug("Using output path", [
             'path' => $outputPath,
             'exists' => file_exists($outputPath),
-            'writable' => is_writable($outputPath)
+            'writable' => is_writable($outputPath),
+            'owner' => posix_getpwuid(fileowner($outputPath))['name'],
+            'group' => posix_getgrgid(filegroup($outputPath))['name'],
+            'permissions' => substr(sprintf('%o', fileperms($outputPath)), -4)
         ]);
 
         return $outputPath;
