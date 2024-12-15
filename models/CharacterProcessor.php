@@ -247,7 +247,7 @@ class CharacterProcessor
             $attempt = 0;
             while ($attempt < $maxAttempts) {
                 // Check if cartoonified file exists
-                $cartoonifiedFile = $tempPath . "cartoonified_" . basename($imageData) . ".json";
+                $cartoonifiedFile = $tempPath . "cartoonified_" . $predictionId . ".json";
                 if (file_exists($cartoonifiedFile)) {
                     $cartoonified = json_decode(file_get_contents($cartoonifiedFile), true);
                     if (isset($cartoonified['cartoonified_url'])) {

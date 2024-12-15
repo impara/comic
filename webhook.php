@@ -99,6 +99,14 @@ try {
                     'completed_at' => time()
                 ]));
 
+                // Update the prediction result file with the cartoonified URL
+                $resultFile = $tempPath . "{$predictionId}.json";
+                if (file_exists($resultFile)) {
+                    $result = json_decode(file_get_contents($resultFile), true);
+                    $result['output'] = is_array($data['output']) ? $data['output'][0] : $data['output'];
+                    file_put_contents($resultFile, json_encode($result));
+                }
+
                 // Clean up the pending file
                 @unlink($pendingFile);
             } elseif ($data['status'] === 'failed') {
