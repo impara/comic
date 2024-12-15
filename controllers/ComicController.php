@@ -85,11 +85,17 @@ class ComicController
                     'result' => $result
                 ]);
 
+                // Get the first prediction ID to use as the main one
+                $mainPredictionId = $result['pending_predictions'][0];
+
                 echo json_encode([
                     'success' => true,
-                    'status' => 'processing',
                     'message' => $result['message'],
-                    'pending_predictions' => $result['pending_predictions']
+                    'result' => [
+                        'id' => $mainPredictionId,
+                        'status' => 'processing',
+                        'pending_predictions' => $result['pending_predictions']
+                    ]
                 ]);
                 return;
             }

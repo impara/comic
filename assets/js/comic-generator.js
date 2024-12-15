@@ -11,18 +11,21 @@ export const ComicGenerator = {
     handleGenerationSuccess(response) {
         if (response.success) {
             console.log('Comic generation initiated:', response.result);
-            // Start checking for results immediately
-            this.checkResult(response.result.id);
 
             // Update UI to show progress
             $('#debugInfo').html(`
                 <p>Generation started successfully</p>
                 <p>Prediction ID: ${response.result.id}</p>
-                <p>Status: Checking for results...</p>
+                <p>Status: ${response.result.status}</p>
+                ${response.result.pending_predictions ?
+                    `<p>Waiting for cartoonification: ${response.result.pending_predictions.join(', ')}</p>` : ''}
             `);
 
             // Update progress bar
             $('.progress-bar').css('width', '25%');
+
+            // Start checking for results
+            this.checkResult(response.result.id);
         } else {
             console.error('Comic generation returned error:', response.message);
             this.handleGenerationError(response.message);
