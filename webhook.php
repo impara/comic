@@ -109,6 +109,25 @@ try {
 
                 // Clean up the pending file
                 @unlink($pendingFile);
+
+                // If this is a cartoonification completion, trigger panel generation
+                if (isset($pending['panel_data'])) {
+                    $panelData = json_decode($pending['panel_data'], true);
+                    $panelData['characters'][0]['cartoonified_image'] = is_array($data['output']) ? $data['output'][0] : $data['output'];
+
+                    // Create a new ComicGenerator instance
+                    require_once __DIR__ . '/models/ComicGenerator.php';
+                    $comicGenerator = new ComicGenerator($logger);
+
+                    // Generate the panel
+                    $panelResult = $comicGenerator->generatePanel(
+                        $panelData['characters'],
+                        $panelData['scene_description']
+                    );
+
+                    // Store the panel result
+                    file_put_contents($resultFile, json_encode($panelResult));
+                }
             } elseif ($data['status'] === 'failed') {
                 $logger->error("Cartoonification failed", [
                     'error' => $data['error'] ?? 'Unknown error',
