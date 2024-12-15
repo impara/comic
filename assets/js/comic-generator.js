@@ -260,15 +260,64 @@ export const ComicGenerator = {
         $('.progress-bar').css('width', '100%');
 
         UIManager.hideGeneratingState(() => {
-            if (result && result.output) {
-                // Validate and sanitize URL
-                const comicUrl = result.output;
-                console.log('Comic URL:', comicUrl);
+            if (result && (result.output || result.panels)) {
+                // Handle both single panel and multi-panel results
+                const panels = result.panels || [result.output];
+                console.log('Comic panels:', panels);
 
-                // Display the comic
-                $('.comic-preview').html(
-                    `<img src="${comicUrl}" class="img-fluid mb-4" alt="Generated Comic" onerror="this.onerror=null; this.src='assets/images/error.png'; console.error('Failed to load comic image');">`
-                );
+                // Create a container for the panels
+                let panelHtml = '<div class="comic-strip-container">';
+
+                // Add each panel
+                panels.forEach((panelUrl, index) => {
+                    if (panelUrl) {
+                        panelHtml += `
+                            <div class="comic-panel">
+                                <img src="${panelUrl}" class="img-fluid mb-4" 
+                                     alt="Comic Panel ${index + 1}" 
+                                     onerror="this.onerror=null; this.src='assets/images/error.png'; console.error('Failed to load comic panel ${index + 1}');">
+                            </div>
+                        `;
+                    }
+                });
+
+                panelHtml += '</div>';
+
+                // Display the comic strip
+                $('.comic-preview').html(panelHtml);
+
+                // Add CSS for panel layout
+                const style = `
+                    <style>
+                        .comic-strip-container {
+                            display: grid;
+                            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+                            gap: 20px;
+                            padding: 20px;
+                            background: #fff;
+                            border-radius: 10px;
+                            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+                        }
+                        .comic-panel {
+                            position: relative;
+                            background: #fff;
+                            padding: 10px;
+                            border: 2px solid #000;
+                            border-radius: 5px;
+                        }
+                        .comic-panel img {
+                            width: 100%;
+                            height: auto;
+                            object-fit: cover;
+                            border-radius: 3px;
+                        }
+                    </style>
+                `;
+
+                // Add the style to the head if it doesn't exist
+                if (!$('head style:contains(".comic-strip-container")').length) {
+                    $('head').append(style);
+                }
 
                 // Enable action buttons
                 $('.action-buttons button').prop('disabled', false);
@@ -279,7 +328,8 @@ export const ComicGenerator = {
                 // Update debug info
                 $('#debugInfo').html(`
                     <p>Comic generation completed successfully!</p>
-                    <p>Image URL: ${comicUrl}</p>
+                    <p>Number of panels: ${panels.length}</p>
+                    ${panels.map((url, i) => `<p>Panel ${i + 1} URL: ${url}</p>`).join('')}
                 `);
             } else {
                 console.error('No output URL in result:', result);

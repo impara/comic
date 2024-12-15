@@ -4,6 +4,7 @@ require_once __DIR__ . '/../interfaces/LoggerInterface.php';
 require_once __DIR__ . '/Config.php';
 require_once __DIR__ . '/CharacterProcessor.php';
 require_once __DIR__ . '/ReplicateClient.php';
+require_once __DIR__ . '/ImageComposer.php';
 
 class ComicGenerator
 {
@@ -36,20 +37,33 @@ class ComicGenerator
         try {
             // Process each custom character
             $processedCharacters = [];
-            foreach ($characters as $character) {
+            $characterImages = [];
+            foreach ($characters as $index => $character) {
                 if (!isset($character['image'])) {
                     throw new Exception("Character image is required");
                 }
                 $processedCharacter = $this->characterProcessor->processCharacter($character);
                 $processedCharacters[] = $processedCharacter;
+
+                // Use cartoonified image for composition
+                $characterImages[$index] = $processedCharacter['cartoonified_image'];
             }
 
-            // Generate the panel
+            // Extract dialogues and thoughts from scene description
+            $sceneContext = $this->extractSceneContext($sceneDescription);
+            $sceneContext['style'] = $characters[0]['options']['style'] ?? 'modern';
+
+            // Compose the panel using ImageComposer
+            $imageComposer = new ImageComposer($this->logger);
+            $composedPanelPath = $imageComposer->composePanel($characterImages, $sceneContext);
+
+            // Generate the final panel with background and composition
             $result = $this->replicateClient->generateImage([
                 'prompt' => $sceneDescription,
                 'characters' => $processedCharacters,
+                'composed_panel' => $composedPanelPath,
                 'options' => [
-                    'style' => $characters[0]['options']['style'] ?? 'modern'
+                    'style' => $sceneContext['style']
                 ]
             ]);
 
@@ -65,5 +79,32 @@ class ComicGenerator
             ]);
             throw $e;
         }
+    }
+
+    /**
+     * Extract dialogues and thoughts from scene description
+     * @param string $sceneDescription Scene description text
+     * @return array Scene context with dialogues and thoughts
+     */
+    private function extractSceneContext(string $sceneDescription): array
+    {
+        $context = [
+            'dialogues' => [],
+            'thoughts' => []
+        ];
+
+        // Extract dialogues (text between quotes)
+        preg_match_all('/[""「」]([^""「」]+)[""「」]/', $sceneDescription, $dialogueMatches);
+        if (!empty($dialogueMatches[1])) {
+            $context['dialogues'] = $dialogueMatches[1];
+        }
+
+        // Extract thoughts (text between single quotes or specific markers)
+        preg_match_all('/\'([^\']+)\'|\(([^\)]+)\)/', $sceneDescription, $thoughtMatches);
+        if (!empty($thoughtMatches[1])) {
+            $context['thoughts'] = array_filter($thoughtMatches[1]);
+        }
+
+        return $context;
     }
 }

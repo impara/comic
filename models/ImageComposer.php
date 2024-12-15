@@ -155,42 +155,104 @@ class ImageComposer
      */
     private function addImageToPanel(\GdImage $panel, string $imageData, int $x, int $y, int $width, int $height): void
     {
-        // Handle both URL and base64 data
-        if (filter_var($imageData, FILTER_VALIDATE_URL)) {
-            $imageContent = file_get_contents($imageData);
-            if ($imageContent === false) {
-                throw new Exception("Failed to download image from URL");
+        try {
+            // Handle different image sources
+            if (filter_var($imageData, FILTER_VALIDATE_URL)) {
+                // For remote URLs (like replicate.delivery)
+                $imageContent = @file_get_contents($imageData);
+                if ($imageContent === false) {
+                    throw new Exception("Failed to download image from URL: $imageData");
+                }
+            } elseif (strpos($imageData, 'data:image') === 0) {
+                // For base64 encoded images
+                $imageContent = base64_decode(preg_replace('#^data:image/\w+;base64,#i', '', $imageData));
+                if ($imageContent === false) {
+                    throw new Exception("Failed to decode base64 image data");
+                }
+            } elseif (file_exists($imageData)) {
+                // For local file paths
+                $imageContent = file_get_contents($imageData);
+                if ($imageContent === false) {
+                    throw new Exception("Failed to read local image file: $imageData");
+                }
+            } else {
+                throw new Exception("Invalid image data source: $imageData");
             }
-        } else {
-            $imageContent = base64_decode(preg_replace('#^data:image/\w+;base64,#i', '', $imageData));
-            if ($imageContent === false) {
-                throw new Exception("Failed to decode base64 image data");
+
+            // Create image from content
+            $image = @imagecreatefromstring($imageContent);
+            if (!$image) {
+                throw new Exception("Failed to create image from data");
             }
-        }
 
-        $image = @imagecreatefromstring($imageContent);
-        if (!$image) {
-            throw new Exception("Failed to create image from data");
-        }
+            // Get original image dimensions
+            $origWidth = imagesx($image);
+            $origHeight = imagesy($image);
 
-        // Resize and copy the image onto the panel
-        if (!imagecopyresampled(
-            $panel,
-            $image,
-            $x,
-            $y,
-            0,
-            0,
-            $width,
-            $height,
-            imagesx($image),
-            imagesy($image)
-        )) {
+            // Create a temporary image for alpha handling
+            $temp = imagecreatetruecolor($width, $height);
+            if (!$temp) {
+                imagedestroy($image);
+                throw new Exception("Failed to create temporary image");
+            }
+
+            // Enable alpha blending
+            imagealphablending($temp, true);
+            imagesavealpha($temp, true);
+
+            // Fill with transparent background
+            $transparent = imagecolorallocatealpha($temp, 0, 0, 0, 127);
+            imagefill($temp, 0, 0, $transparent);
+
+            // Copy and resize the image
+            if (!imagecopyresampled(
+                $temp,
+                $image,
+                0,
+                0,
+                0,
+                0,
+                $width,
+                $height,
+                $origWidth,
+                $origHeight
+            )) {
+                imagedestroy($image);
+                imagedestroy($temp);
+                throw new Exception("Failed to resize image");
+            }
+
+            // Copy the temporary image to the panel
+            if (!imagecopy(
+                $panel,
+                $temp,
+                $x,
+                $y,
+                0,
+                0,
+                $width,
+                $height
+            )) {
+                imagedestroy($image);
+                imagedestroy($temp);
+                throw new Exception("Failed to copy image to panel");
+            }
+
+            // Clean up
             imagedestroy($image);
-            throw new Exception("Failed to copy image to panel");
-        }
+            imagedestroy($temp);
 
-        imagedestroy($image);
+            $this->logger->info("Successfully added image to panel", [
+                'position' => ['x' => $x, 'y' => $y],
+                'dimensions' => ['width' => $width, 'height' => $height]
+            ]);
+        } catch (Exception $e) {
+            $this->logger->error("Failed to add image to panel", [
+                'error' => $e->getMessage(),
+                'image_data' => substr($imageData, 0, 100) . '...'
+            ]);
+            throw $e;
+        }
     }
 
     /**

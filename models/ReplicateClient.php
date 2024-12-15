@@ -157,22 +157,66 @@ class ReplicateClient
             // Get the webhook URL from config
             $webhookUrl = $this->config->getBaseUrl() . '/webhook.php';
 
-            // Log webhook configuration
-            $this->logger->info("Webhook configuration", [
-                'base_url' => $this->config->getBaseUrl(),
-                'webhook_url' => $webhookUrl,
-                'webhook_secret' => !empty($this->config->get('replicate.webhook_secret')),
-                'server_info' => [
-                    'http_host' => $_SERVER['HTTP_HOST'] ?? 'not set',
-                    'request_uri' => $_SERVER['REQUEST_URI'] ?? 'not set',
-                    'https' => isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on',
-                    'server_port' => $_SERVER['SERVER_PORT'] ?? 'not set'
-                ]
+            // If we have a composed panel, convert it to a URL
+            if (isset($params['composed_panel']) && file_exists($params['composed_panel'])) {
+                $publicPath = str_replace($this->config->getOutputPath(), '', $params['composed_panel']);
+                $baseUrl = $this->config->getBaseUrl();
+                $params['composed_panel'] = rtrim($baseUrl, '/') . '/public/generated/' . ltrim($publicPath, '/');
+
+                $this->logger->info("Converted composed panel path to URL", [
+                    'original_path' => $params['composed_panel'],
+                    'public_url' => $params['composed_panel']
+                ]);
+            }
+
+            // Build enhanced prompt with style, background, and story context
+            $style = $params['options']['style'] ?? 'modern';
+            $basePrompt = $params['prompt'] ?? '';
+
+            // Style-specific prompt enhancements
+            $stylePrompts = [
+                'manga' => 'high-quality manga art style, detailed manga shading, dynamic manga composition',
+                'comic' => 'professional comic book art style, vibrant colors, dynamic comic book composition',
+                'european' => 'European comic art style, ligne claire, detailed backgrounds, clear lines',
+                'modern' => 'modern digital art style, high detail, professional illustration'
+            ];
+
+            // Build the final prompt
+            $enhancedPrompt = "Create a {$style} comic panel: {$basePrompt}. ";
+            $enhancedPrompt .= $stylePrompts[$style] ?? $stylePrompts['modern'];
+
+            if (isset($params['composed_panel'])) {
+                $enhancedPrompt .= " Use the provided character composition as reference for character placement and poses.";
+            }
+
+            // Add background context if available
+            if (isset($params['background'])) {
+                $enhancedPrompt .= " Set in {$params['background']}.";
+            }
+
+            // Update parameters with enhanced prompt and style-specific settings
+            $modelParams = [
+                'prompt' => $enhancedPrompt,
+                'negative_prompt' => implode(', ', $this->config->getNegativePrompts()),
+                'steps' => 30,
+                'width' => 1024,
+                'height' => 1024,
+                'cfg_scale' => 7.5,
+                'init_image' => $params['composed_panel'] ?? null,
+                'prompt_strength' => isset($params['composed_panel']) ? 0.7 : 1.0
+            ];
+
+            // Log the final prompt
+            $this->logger->info("Generated enhanced prompt", [
+                'prompt' => $enhancedPrompt,
+                'style' => $style,
+                'has_composition' => isset($params['composed_panel'])
             ]);
 
+            // Make the API call
             $result = $this->httpClient->post('https://api.replicate.com/v1/predictions', [
                 'version' => $this->config->get('replicate.models.txt2img.version'),
-                'input' => $params,
+                'input' => $modelParams,
                 'webhook' => $webhookUrl,
                 'webhook_events_filter' => ['completed']  // Only receive webhook when prediction is complete
             ]);

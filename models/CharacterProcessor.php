@@ -123,16 +123,62 @@ class CharacterProcessor
                 throw new Exception("Character image is required");
             }
 
-            // Process the uploaded image
-            $processedImage = $this->processImage($character['image']);
+            // Check if this character has already been cartoonified
+            $tempPath = $this->config->getTempPath();
+            $cartoonifiedFile = $tempPath . "cartoonified_" . basename($character['image']) . ".json";
 
-            return [
-                'id' => $character['id'],
-                'name' => $character['name'],
-                'description' => $character['description'],
-                'image' => $processedImage,
-                'options' => $character['options'] ?? []
-            ];
+            if (file_exists($cartoonifiedFile)) {
+                // Use existing cartoonified version
+                $cartoonified = json_decode(file_get_contents($cartoonifiedFile), true);
+                if (!empty($cartoonified['cartoonified_url'])) {
+                    return [
+                        'id' => $character['id'],
+                        'name' => $character['name'],
+                        'description' => $character['description'],
+                        'image' => $character['image'],
+                        'cartoonified_image' => $cartoonified['cartoonified_url'],
+                        'options' => $character['options'] ?? []
+                    ];
+                }
+            }
+
+            // Start cartoonification if not already done
+            $result = $this->cartoonifyCharacter($character['image']);
+            $predictionId = $result['id'];
+
+            // Create a pending file to track this cartoonification
+            $pendingFile = $tempPath . "pending_{$predictionId}.json";
+            file_put_contents($pendingFile, json_encode([
+                'prediction_id' => $predictionId,
+                'original_image' => $character['image'],
+                'started_at' => time()
+            ]));
+
+            // Wait for cartoonification to complete (max 30 seconds)
+            $maxAttempts = 30;
+            $attempt = 0;
+            while ($attempt < $maxAttempts) {
+                if (file_exists($cartoonifiedFile)) {
+                    $cartoonified = json_decode(file_get_contents($cartoonifiedFile), true);
+                    if (!empty($cartoonified['cartoonified_url'])) {
+                        // Clean up the pending file
+                        @unlink($pendingFile);
+
+                        return [
+                            'id' => $character['id'],
+                            'name' => $character['name'],
+                            'description' => $character['description'],
+                            'image' => $character['image'],
+                            'cartoonified_image' => $cartoonified['cartoonified_url'],
+                            'options' => $character['options'] ?? []
+                        ];
+                    }
+                }
+                sleep(1);
+                $attempt++;
+            }
+
+            throw new Exception("Timed out waiting for cartoonification to complete");
         } catch (Exception $e) {
             $this->logger->error("Character processing failed", [
                 'error' => $e->getMessage(),
