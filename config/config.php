@@ -42,19 +42,6 @@ return [
                     'seed' => 2862431,
                     'image' => null  // Will be set dynamically
                 ]
-            ],
-            'describe' => [
-                'version' => '50adaf2d3ad20a6f911a8a9e3ccf777b263b8596fbd2c8fc26e8888f8a0edbb5',
-                'params' => [
-                    'image' => null,  // Will be set dynamically
-                    'clip_model_name' => "ViT-L-14/openai",
-                    'mode' => "fast",
-                    'min_length' => 50,
-                    'max_length' => 300,
-                    'temperature' => 0.7,
-                    'num_images' => 1,
-                    'num_beams' => 4
-                ]
             ]
         ]
     ],

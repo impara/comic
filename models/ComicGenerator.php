@@ -64,9 +64,10 @@ class ComicGenerator
                 ];
             }
 
-            // Extract dialogues and thoughts from scene description
-            $sceneContext = $this->extractSceneContext($sceneDescription);
-            $sceneContext['style'] = $characters[0]['options']['style'] ?? 'modern';
+            // Prepare scene context
+            $sceneContext = [
+                'style' => $characters[0]['options']['style'] ?? 'modern'
+            ];
 
             // Compose the panel using ImageComposer
             $imageComposer = new ImageComposer($this->logger);
@@ -94,32 +95,5 @@ class ComicGenerator
             ]);
             throw $e;
         }
-    }
-
-    /**
-     * Extract dialogues and thoughts from scene description
-     * @param string $sceneDescription Scene description text
-     * @return array Scene context with dialogues and thoughts
-     */
-    private function extractSceneContext(string $sceneDescription): array
-    {
-        $context = [
-            'dialogues' => [],
-            'thoughts' => []
-        ];
-
-        // Extract dialogues (text between quotes)
-        preg_match_all('/[""「」]([^""「」]+)[""「」]/', $sceneDescription, $dialogueMatches);
-        if (!empty($dialogueMatches[1])) {
-            $context['dialogues'] = $dialogueMatches[1];
-        }
-
-        // Extract thoughts (text between single quotes or specific markers)
-        preg_match_all('/\'([^\']+)\'|\(([^\)]+)\)/', $sceneDescription, $thoughtMatches);
-        if (!empty($thoughtMatches[1])) {
-            $context['thoughts'] = array_filter($thoughtMatches[1]);
-        }
-
-        return $context;
     }
 }

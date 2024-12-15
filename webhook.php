@@ -113,6 +113,13 @@ try {
                 // If this is a cartoonification completion, trigger panel generation
                 if (isset($pending['panel_data'])) {
                     $panelData = json_decode($pending['panel_data'], true);
+                    if ($panelData === null) {
+                        $logger->error("Failed to parse panel_data JSON", [
+                            'panel_data' => $pending['panel_data'],
+                            'json_error' => json_last_error_msg()
+                        ]);
+                        throw new Exception("Invalid panel_data format");
+                    }
                     $panelData['characters'][0]['cartoonified_image'] = is_array($data['output']) ? $data['output'][0] : $data['output'];
 
                     // Create a new ComicGenerator instance

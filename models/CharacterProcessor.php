@@ -3,7 +3,6 @@
 require_once __DIR__ . '/../interfaces/LoggerInterface.php';
 require_once __DIR__ . '/Config.php';
 require_once __DIR__ . '/ReplicateClient.php';
-require_once __DIR__ . '/PromptBuilder.php';
 require_once __DIR__ . '/ImageComposer.php';
 require_once __DIR__ . '/FileManager.php';
 
@@ -11,7 +10,6 @@ class CharacterProcessor
 {
     private LoggerInterface $logger;
     private ReplicateClient $replicateClient;
-    private PromptBuilder $promptBuilder;
     private ImageComposer $imageComposer;
     private Config $config;
     private FileManager $fileManager;
@@ -21,52 +19,8 @@ class CharacterProcessor
         $this->logger = $logger;
         $this->config = Config::getInstance();
         $this->replicateClient = new ReplicateClient($logger);
-        $this->promptBuilder = new PromptBuilder();
         $this->imageComposer = new ImageComposer($logger);
         $this->fileManager = FileManager::getInstance($logger);
-    }
-
-    /**
-     * Generate a character image from text description
-     * @param string $characterDescription Character description
-     * @param array|string $options Additional options or scene description
-     * @return array Generated image data
-     */
-    public function generateCharacter(string $characterDescription, $options = ''): array
-    {
-        if (is_string($options)) {
-            // Legacy mode - options is scene description
-            $prompt = $this->promptBuilder->buildCharacterPrompt($characterDescription, $options);
-            $this->logger->debug("Generating character", [
-                'character' => $characterDescription,
-                'scene' => $options
-            ]);
-        } else {
-            // New mode - options is array of parameters
-            $prompt = $characterDescription; // For txt2img, use prompt directly
-            $this->logger->debug("Generating image with txt2img", [
-                'prompt' => $prompt,
-                'options' => $options
-            ]);
-        }
-
-        // Add style-specific parameters if provided
-        $params = [];
-        if (is_array($options) && isset($options['style'])) {
-            switch (strtolower($options['style'])) {
-                case 'manga':
-                case 'anime':
-                    $params['style'] = 'anime';
-                    break;
-                case 'comic':
-                default:
-                    $params['style'] = 'comic';
-                    break;
-            }
-        }
-
-        // Generate the image directly
-        return $this->replicateClient->txt2img($prompt, $params);
     }
 
     /**
@@ -160,63 +114,6 @@ class CharacterProcessor
             ];
         } catch (Exception $e) {
             $this->logger->error("Character processing failed", [
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
-            ]);
-            throw $e;
-        }
-    }
-
-    /**
-     * Process a character image through the cartoonification model
-     * @param string $imageData Base64 or URL of the image
-     * @return string Processed image data
-     */
-    private function processImage(string $imageData): string
-    {
-        try {
-            // If the image is already cartoonified (from webhook), return it directly
-            if (
-                strpos($imageData, '/public/generated/') !== false ||
-                strpos($imageData, 'replicate.delivery') !== false
-            ) {
-                return $imageData;
-            }
-
-            // Start cartoonification
-            $result = $this->cartoonifyCharacter($imageData);
-            $predictionId = $result['id'];
-
-            // Create a pending file to track this cartoonification
-            $tempPath = $this->config->getTempPath();
-            $pendingFile = $tempPath . "pending_{$predictionId}.json";
-            file_put_contents($pendingFile, json_encode([
-                'prediction_id' => $predictionId,
-                'original_image' => $imageData,
-                'started_at' => time()
-            ]));
-
-            // Wait for cartoonification to complete (max 30 seconds)
-            $maxAttempts = 30;
-            $attempt = 0;
-            while ($attempt < $maxAttempts) {
-                // Check if cartoonified file exists
-                $cartoonifiedFile = $tempPath . "cartoonified_" . $predictionId . ".json";
-                if (file_exists($cartoonifiedFile)) {
-                    $cartoonified = json_decode(file_get_contents($cartoonifiedFile), true);
-                    if (isset($cartoonified['cartoonified_url'])) {
-                        // Clean up the pending file
-                        @unlink($pendingFile);
-                        return $cartoonified['cartoonified_url'];
-                    }
-                }
-                sleep(1);
-                $attempt++;
-            }
-
-            throw new Exception("Timed out waiting for cartoonification to complete");
-        } catch (Exception $e) {
-            $this->logger->error("Failed to process image", [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString()
             ]);
