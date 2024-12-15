@@ -25,13 +25,15 @@ class ComicGenerator
      * Generate a comic panel with characters
      * @param array $characters Array of character data
      * @param string $sceneDescription Description of the scene
+     * @param string|null $originalPredictionId Original prediction ID to update with final result
      * @return array Generated comic data
      */
-    public function generatePanel(array $characters, string $sceneDescription): array
+    public function generatePanel(array $characters, string $sceneDescription, ?string $originalPredictionId = null): array
     {
         $this->logger->info("Starting comic panel generation", [
             'character_count' => count($characters),
-            'description_length' => strlen($sceneDescription)
+            'description_length' => strlen($sceneDescription),
+            'original_prediction_id' => $originalPredictionId
         ]);
 
         try {
@@ -92,15 +94,37 @@ class ComicGenerator
                 ]
             ]);
 
+            // If we have an original prediction ID, store the final result
+            if ($originalPredictionId && isset($result['id'])) {
+                $tempPath = $this->config->getTempPath();
+                $resultFile = $tempPath . "{$originalPredictionId}.json";
+
+                // Store the mapping between the new prediction and original
+                $mappingFile = $tempPath . "mapping_{$result['id']}.json";
+                file_put_contents($mappingFile, json_encode([
+                    'original_prediction_id' => $originalPredictionId,
+                    'panel_prediction_id' => $result['id'],
+                    'created_at' => date('c')
+                ]));
+
+                $this->logger->info("Stored prediction mapping", [
+                    'original_id' => $originalPredictionId,
+                    'panel_id' => $result['id'],
+                    'mapping_file' => $mappingFile
+                ]);
+            }
+
             $this->logger->info("Panel generation completed", [
-                'result' => $result
+                'result' => $result,
+                'original_prediction_id' => $originalPredictionId
             ]);
 
             return $result;
         } catch (Exception $e) {
             $this->logger->error("Panel generation failed", [
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'trace' => $e->getTraceAsString(),
+                'original_prediction_id' => $originalPredictionId
             ]);
             throw $e;
         }

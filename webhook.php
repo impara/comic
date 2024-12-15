@@ -91,25 +91,6 @@ try {
                     'cartoonified_url' => is_array($data['output']) ? $data['output'][0] : $data['output']
                 ]);
 
-                // Store cartoonification result in a separate file
-                $cartoonifiedFile = $tempPath . "cartoonified_{$predictionId}.json";
-                file_put_contents($cartoonifiedFile, json_encode([
-                    'original_image' => $pending['original_image'],
-                    'cartoonified_url' => is_array($data['output']) ? $data['output'][0] : $data['output'],
-                    'completed_at' => time()
-                ]));
-
-                // Update the prediction result file with the cartoonified URL
-                $resultFile = $tempPath . "{$predictionId}.json";
-                if (file_exists($resultFile)) {
-                    $result = json_decode(file_get_contents($resultFile), true);
-                    $result['output'] = is_array($data['output']) ? $data['output'][0] : $data['output'];
-                    file_put_contents($resultFile, json_encode($result));
-                }
-
-                // Clean up the pending file
-                @unlink($pendingFile);
-
                 // If this is a cartoonification completion, trigger panel generation
                 if (isset($pending['panel_data'])) {
                     $panelData = json_decode($pending['panel_data'], true);
@@ -129,32 +110,20 @@ try {
                     require_once __DIR__ . '/models/ComicGenerator.php';
                     $comicGenerator = new ComicGenerator($logger);
 
-                    // Generate the final panel
+                    // Generate the final panel, passing the original prediction ID
                     $panelResult = $comicGenerator->generatePanel(
                         $panelData['characters'],
-                        $panelData['scene_description']
+                        $panelData['scene_description'],
+                        $predictionId
                     );
 
-                    $logger->info("Panel generation attempt", [
+                    $logger->info("Panel generation initiated", [
                         'prediction_id' => $predictionId,
                         'panel_result' => $panelResult
                     ]);
 
-                    // Write the final panel result
-                    file_put_contents($resultFile, json_encode([
-                        'id' => $predictionId,
-                        'status' => 'succeeded',
-                        'output' => $panelResult['output'] ?? null,
-                        'type' => 'panel',
-                        'completed_at' => date('c')
-                    ]));
-
-                    $logger->info("Final panel result written", [
-                        'file' => $resultFile,
-                        'panel_result' => $panelResult
-                    ]);
-
-                    // Skip writing raw webhook payload since we've written the panel result
+                    // Clean up the pending file since we're done with cartoonification
+                    @unlink($pendingFile);
                     return;
                 }
             } elseif ($data['status'] === 'failed') {
@@ -168,7 +137,61 @@ try {
         }
     }
 
-    // Only store the raw webhook payload if we haven't written a panel result
+    // Check if this is a final panel generation completion
+    $mappingFiles = glob($tempPath . "mapping_*.json");
+    foreach ($mappingFiles as $mappingFile) {
+        $mapping = json_decode(file_get_contents($mappingFile), true);
+        if ($mapping && isset($mapping['panel_prediction_id']) && $mapping['panel_prediction_id'] === $predictionId) {
+            $logger->info("Found matching panel prediction mapping", [
+                'mapping_file' => $mappingFile,
+                'original_id' => $mapping['original_prediction_id'],
+                'panel_id' => $predictionId
+            ]);
+
+            if ($data['status'] === 'succeeded' && !empty($data['output'])) {
+                // Write the final result to the original prediction file
+                $originalResultFile = $tempPath . "{$mapping['original_prediction_id']}.json";
+                file_put_contents($originalResultFile, json_encode([
+                    'id' => $mapping['original_prediction_id'],
+                    'status' => 'succeeded',
+                    'output' => is_array($data['output']) ? $data['output'][0] : $data['output'],
+                    'type' => 'panel',
+                    'completed_at' => date('c')
+                ]));
+
+                $logger->info("Final panel result written to original prediction file", [
+                    'original_file' => $originalResultFile,
+                    'panel_output' => $data['output']
+                ]);
+
+                // Clean up the mapping file
+                @unlink($mappingFile);
+                return;
+            } elseif ($data['status'] === 'failed') {
+                // If panel generation failed, update the original prediction with the error
+                $originalResultFile = $tempPath . "{$mapping['original_prediction_id']}.json";
+                file_put_contents($originalResultFile, json_encode([
+                    'id' => $mapping['original_prediction_id'],
+                    'status' => 'failed',
+                    'error' => $data['error'] ?? 'Panel generation failed',
+                    'type' => 'panel',
+                    'completed_at' => date('c')
+                ]));
+
+                $logger->error("Panel generation failed", [
+                    'error' => $data['error'] ?? 'Unknown error',
+                    'original_id' => $mapping['original_prediction_id']
+                ]);
+
+                // Clean up the mapping file
+                @unlink($mappingFile);
+                return;
+            }
+            break;
+        }
+    }
+
+    // If we get here, this is an unknown prediction - store it as-is
     $writeResult = file_put_contents($tempFile, $payload);
     if ($writeResult === false) {
         $error = error_get_last();
@@ -180,7 +203,7 @@ try {
         throw new Exception("Failed to write prediction result: " . ($error['message'] ?? 'Unknown error'));
     }
 
-    $logger->info("Stored prediction result", [
+    $logger->info("Stored unknown prediction result", [
         'file' => $tempFile,
         'prediction_id' => $predictionId,
         'bytes_written' => $writeResult
