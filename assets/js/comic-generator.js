@@ -220,11 +220,22 @@ export const ComicGenerator = {
             success: (result) => {
                 console.log('Result check response:', {
                     status: result.status,
+                    type: result.type,
                     output: result.output,
                     raw: result
                 });
-                if (result.status === 'succeeded' && result.output) {
-                    this.displayGeneratedComic(result);
+
+                if (result.status === 'succeeded') {
+                    if (result.type === 'panel') {
+                        // This is the final panel result
+                        this.displayGeneratedComic(result);
+                    } else {
+                        // This is just the cartoonification result, keep polling
+                        console.log('Cartoonification completed, waiting for panel generation...');
+                        setTimeout(() => {
+                            this.checkResult(predictionId);
+                        }, 5000);
+                    }
                 } else if (result.status === 'failed') {
                     console.error('Generation failed:', result.error);
                     this.handleGenerationError(result.error || 'Generation failed');

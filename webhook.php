@@ -136,14 +136,21 @@ try {
                     $panelResultFile = $tempPath . "panel_{$predictionId}.json";
                     file_put_contents($panelResultFile, json_encode($panelResult));
 
-                    // Update the original result file to point to the panel result
+                    // Update the original result file to indicate panel generation is complete
                     $result = [
                         'status' => 'succeeded',
+                        'type' => 'panel', // Add type to differentiate between cartoonification and panel
                         'output' => $panelResult['output'] ?? null,
                         'completed_at' => date('c'),
-                        'panel_data' => $panelResult
+                        'panel_data' => $panelResult,
+                        'cartoonified_url' => is_array($data['output']) ? $data['output'][0] : $data['output']
                     ];
                     file_put_contents($resultFile, json_encode($result));
+
+                    $logger->info("Panel generation completed", [
+                        'prediction_id' => $predictionId,
+                        'panel_result' => $panelResult
+                    ]);
                 }
             } elseif ($data['status'] === 'failed') {
                 $logger->error("Cartoonification failed", [
