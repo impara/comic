@@ -38,6 +38,7 @@ class ComicGenerator
             // Process each custom character
             $processedCharacters = [];
             $characterImages = [];
+            $pendingCartoonifications = [];
             foreach ($characters as $index => $character) {
                 if (!isset($character['image'])) {
                     throw new Exception("Character image is required");
@@ -45,8 +46,22 @@ class ComicGenerator
                 $processedCharacter = $this->characterProcessor->processCharacter($character);
                 $processedCharacters[] = $processedCharacter;
 
-                // Use cartoonified image for composition
-                $characterImages[$index] = $processedCharacter['cartoonified_image'];
+                // If character has a prediction_id, it means cartoonification is pending
+                if (isset($processedCharacter['prediction_id'])) {
+                    $pendingCartoonifications[] = $processedCharacter['prediction_id'];
+                } else {
+                    // Use cartoonified image for composition
+                    $characterImages[$index] = $processedCharacter['cartoonified_image'];
+                }
+            }
+
+            // If there are pending cartoonifications, return early with status
+            if (!empty($pendingCartoonifications)) {
+                return [
+                    'status' => 'processing',
+                    'message' => 'Waiting for cartoonification to complete',
+                    'pending_predictions' => $pendingCartoonifications
+                ];
             }
 
             // Extract dialogues and thoughts from scene description

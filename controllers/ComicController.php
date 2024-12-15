@@ -79,6 +79,21 @@ class ComicController
                 $input['scene_description']
             );
 
+            // If result indicates processing, return that status
+            if (isset($result['status']) && $result['status'] === 'processing') {
+                $this->logger->info('Comic generation in processing state', [
+                    'result' => $result
+                ]);
+
+                echo json_encode([
+                    'success' => true,
+                    'status' => 'processing',
+                    'message' => $result['message'],
+                    'pending_predictions' => $result['pending_predictions']
+                ]);
+                return;
+            }
+
             $this->logger->info('Comic generation successful', [
                 'result' => $result
             ]);

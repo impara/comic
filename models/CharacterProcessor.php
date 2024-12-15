@@ -148,62 +148,16 @@ class CharacterProcessor
                 'started_at' => time()
             ]));
 
-            // Wait for cartoonification to complete (max 30 seconds)
-            $maxAttempts = 30;
-            $attempt = 0;
-            while ($attempt < $maxAttempts) {
-                // Check for cartoonification result
-                $cartoonifiedFile = $tempPath . "cartoonified_{$predictionId}.json";
-                if (file_exists($cartoonifiedFile)) {
-                    $cartoonified = json_decode(file_get_contents($cartoonifiedFile), true);
-                    if (!empty($cartoonified['cartoonified_url'])) {
-                        // Clean up the pending file
-                        @unlink($pendingFile);
-
-                        $this->logger->info("Found cartoonification result", [
-                            'original_image' => $character['image'],
-                            'cartoonified_url' => $cartoonified['cartoonified_url']
-                        ]);
-
-                        return [
-                            'id' => $character['id'],
-                            'name' => $character['name'],
-                            'description' => $character['description'],
-                            'image' => $character['image'],
-                            'cartoonified_image' => $cartoonified['cartoonified_url'],
-                            'options' => $character['options'] ?? []
-                        ];
-                    }
-                }
-
-                // Also check the prediction result file as fallback
-                $resultFile = $tempPath . "{$predictionId}.json";
-                if (file_exists($resultFile)) {
-                    $result = json_decode(file_get_contents($resultFile), true);
-                    if (isset($result['status']) && $result['status'] === 'succeeded' && !empty($result['output'])) {
-                        $cartoonifiedUrl = is_array($result['output']) ? $result['output'][0] : $result['output'];
-
-                        $this->logger->info("Found cartoonification in prediction result", [
-                            'original_image' => $character['image'],
-                            'cartoonified_url' => $cartoonifiedUrl
-                        ]);
-
-                        return [
-                            'id' => $character['id'],
-                            'name' => $character['name'],
-                            'description' => $character['description'],
-                            'image' => $character['image'],
-                            'cartoonified_image' => $cartoonifiedUrl,
-                            'options' => $character['options'] ?? []
-                        ];
-                    }
-                }
-
-                sleep(1);
-                $attempt++;
-            }
-
-            throw new Exception("Timed out waiting for cartoonification to complete");
+            // Return immediately with the prediction ID
+            return [
+                'id' => $character['id'],
+                'name' => $character['name'],
+                'description' => $character['description'],
+                'image' => $character['image'],
+                'cartoonified_image' => null,
+                'prediction_id' => $predictionId,
+                'options' => $character['options'] ?? []
+            ];
         } catch (Exception $e) {
             $this->logger->error("Character processing failed", [
                 'error' => $e->getMessage(),
