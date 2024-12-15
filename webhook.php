@@ -120,37 +120,32 @@ try {
                         ]);
                         throw new Exception("Invalid panel_data format");
                     }
+
+                    // Update the character with cartoonified image
                     $panelData['characters'][0]['cartoonified_image'] = is_array($data['output']) ? $data['output'][0] : $data['output'];
 
                     // Create a new ComicGenerator instance
                     require_once __DIR__ . '/models/ComicGenerator.php';
                     $comicGenerator = new ComicGenerator($logger);
 
-                    // Generate the panel
+                    // Generate the final panel
                     $panelResult = $comicGenerator->generatePanel(
                         $panelData['characters'],
                         $panelData['scene_description']
                     );
 
-                    // Store the panel result in a new file to avoid overwriting the cartoonification result
-                    $panelResultFile = $tempPath . "panel_{$predictionId}.json";
-                    file_put_contents($panelResultFile, json_encode($panelResult));
-
-                    // Update the original result file to indicate panel generation is complete
-                    $result = [
-                        'status' => 'succeeded',
-                        'type' => 'panel', // Add type to differentiate between cartoonification and panel
-                        'output' => $panelResult['output'] ?? null,
-                        'completed_at' => date('c'),
-                        'panel_data' => $panelResult,
-                        'cartoonified_url' => is_array($data['output']) ? $data['output'][0] : $data['output']
-                    ];
-                    file_put_contents($resultFile, json_encode($result));
-
                     $logger->info("Panel generation completed", [
                         'prediction_id' => $predictionId,
                         'panel_result' => $panelResult
                     ]);
+
+                    // Write the final panel result directly to the prediction file
+                    file_put_contents($resultFile, json_encode([
+                        'id' => $predictionId,
+                        'status' => 'succeeded',
+                        'output' => $panelResult['output'] ?? null,
+                        'completed_at' => date('c')
+                    ]));
                 }
             } elseif ($data['status'] === 'failed') {
                 $logger->error("Cartoonification failed", [
