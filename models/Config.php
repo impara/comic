@@ -125,7 +125,35 @@ class Config
         if (!$path) {
             throw new RuntimeException('Temp directory not configured');
         }
-        return rtrim($path, '/') . '/';
+
+        $fullPath = rtrim($path, '/') . '/';
+
+        // Create directory if it doesn't exist
+        if (!file_exists($fullPath)) {
+            if (!mkdir($fullPath, 0775, true)) {
+                error_log("Failed to create temp directory: $fullPath");
+                throw new RuntimeException("Failed to create temp directory: $fullPath");
+            }
+
+            // Set proper permissions
+            if (function_exists('posix_getpwuid')) {
+                chown($fullPath, 'www-data');
+                chgrp($fullPath, 'www-data');
+            }
+
+            error_log("Created temp directory: $fullPath");
+        }
+
+        // Check permissions
+        if (!is_writable($fullPath)) {
+            error_log("Temp directory is not writable: $fullPath");
+            error_log("Permissions: " . substr(sprintf('%o', fileperms($fullPath)), -4));
+            error_log("Owner: " . (function_exists('posix_getpwuid') ? posix_getpwuid(fileowner($fullPath))['name'] : 'unknown'));
+            error_log("Group: " . (function_exists('posix_getgrgid') ? posix_getgrgid(filegroup($fullPath))['name'] : 'unknown'));
+            throw new RuntimeException("Temp directory is not writable: $fullPath");
+        }
+
+        return $fullPath;
     }
 
     public function getBaseUrl(): string

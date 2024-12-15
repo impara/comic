@@ -208,11 +208,18 @@ export const ComicGenerator = {
 
     checkResult(predictionId) {
         console.log('Checking result for prediction:', predictionId);
+        const url = this.getApiUrl(`public/temp/${predictionId}.json`);
+        console.log('Polling URL:', url);
+
         $.ajax({
-            url: this.getApiUrl(`public/temp/${predictionId}.json`),
+            url: url,
             type: 'GET',
             success: (result) => {
-                console.log('Result check response:', result);
+                console.log('Result check response:', {
+                    status: result.status,
+                    output: result.output,
+                    raw: result
+                });
                 if (result.status === 'succeeded' && result.output) {
                     this.displayGeneratedComic(result);
                 } else if (result.status === 'failed') {
@@ -227,7 +234,12 @@ export const ComicGenerator = {
                 }
             },
             error: (xhr, status, error) => {
-                console.error('Error checking result:', error);
+                console.error('Error checking result:', {
+                    status: xhr.status,
+                    statusText: xhr.statusText,
+                    responseText: xhr.responseText,
+                    error: error
+                });
                 // If file not found, it might not be created yet, try again
                 if (xhr.status === 404) {
                     console.log('Result file not found yet, retrying in 5 seconds');

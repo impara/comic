@@ -13,6 +13,12 @@ try {
     $payload = file_get_contents('php://input');
     $data = json_decode($payload, true);
 
+    $logger->info("Webhook received", [
+        'payload_length' => strlen($payload),
+        'data' => $data,
+        'request_headers' => getallheaders()
+    ]);
+
     if (!$data) {
         throw new Exception("Invalid JSON payload received");
     }
@@ -20,6 +26,11 @@ try {
     // Check if we're in testing mode (no webhook secret configured)
     $webhookSecret = $config->get('replicate.webhook_secret');
     $isTestingMode = empty($webhookSecret);
+
+    $logger->info("Webhook mode", [
+        'testing_mode' => $isTestingMode,
+        'has_secret' => !empty($webhookSecret)
+    ]);
 
     if ($isTestingMode) {
         $logger->warning("Running in TESTING MODE - webhook signature verification disabled");
@@ -52,11 +63,33 @@ try {
     $predictionId = $data['id'];
     $tempPath = $config->getTempPath();
     $tempFile = $tempPath . "{$predictionId}.json";
-    file_put_contents($tempFile, $payload);
+
+    // Log temp directory details
+    $logger->info("Temp directory details", [
+        'path' => $tempPath,
+        'exists' => file_exists($tempPath),
+        'writable' => is_writable($tempPath),
+        'owner' => function_exists('posix_getpwuid') ? posix_getpwuid(fileowner($tempPath))['name'] : 'unknown',
+        'group' => function_exists('posix_getgrgid') ? posix_getgrgid(filegroup($tempPath))['name'] : 'unknown',
+        'permissions' => substr(sprintf('%o', fileperms($tempPath)), -4)
+    ]);
+
+    // Try to write the file with error handling
+    $writeResult = file_put_contents($tempFile, $payload);
+    if ($writeResult === false) {
+        $error = error_get_last();
+        $logger->error("Failed to write prediction result", [
+            'file' => $tempFile,
+            'error' => $error['message'] ?? 'Unknown error',
+            'php_error' => error_get_last()
+        ]);
+        throw new Exception("Failed to write prediction result: " . ($error['message'] ?? 'Unknown error'));
+    }
 
     $logger->info("Stored prediction result", [
         'file' => $tempFile,
-        'prediction_id' => $predictionId
+        'prediction_id' => $predictionId,
+        'bytes_written' => $writeResult
     ]);
 
     // Check if this is a cartoonification completion
