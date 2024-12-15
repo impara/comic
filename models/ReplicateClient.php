@@ -154,13 +154,32 @@ class ReplicateClient
         ]);
 
         try {
-            $result = $this->httpClient->post('https://api.replicate.com/v1/predictions', [
-                'version' => $this->config->get('replicate.models.txt2img.version'),
-                'input' => $params
+            // Get the webhook URL from config
+            $webhookUrl = $this->config->getBaseUrl() . '/webhook.php';
+
+            // Log webhook configuration
+            $this->logger->info("Webhook configuration", [
+                'base_url' => $this->config->getBaseUrl(),
+                'webhook_url' => $webhookUrl,
+                'webhook_secret' => !empty($this->config->get('replicate.webhook_secret')),
+                'server_info' => [
+                    'http_host' => $_SERVER['HTTP_HOST'] ?? 'not set',
+                    'request_uri' => $_SERVER['REQUEST_URI'] ?? 'not set',
+                    'https' => isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on',
+                    'server_port' => $_SERVER['SERVER_PORT'] ?? 'not set'
+                ]
             ]);
 
-            $this->logger->info("Image generation completed", [
-                'result' => $result
+            $result = $this->httpClient->post('https://api.replicate.com/v1/predictions', [
+                'version' => $this->config->get('replicate.models.txt2img.version'),
+                'input' => $params,
+                'webhook' => $webhookUrl,
+                'webhook_events_filter' => ['completed']  // Only receive webhook when prediction is complete
+            ]);
+
+            $this->logger->info("Image generation initiated", [
+                'result' => $result,
+                'webhook_url' => $webhookUrl
             ]);
 
             return $result;
