@@ -146,6 +146,14 @@ try {
                         'output' => $panelResult['output'] ?? null,
                         'completed_at' => date('c')
                     ]));
+
+                    $logger->info("Final panel result written", [
+                        'file' => $resultFile,
+                        'panel_result' => $panelResult
+                    ]);
+
+                    // Skip writing raw webhook payload since we've written the panel result
+                    return;
                 }
             } elseif ($data['status'] === 'failed') {
                 $logger->error("Cartoonification failed", [
@@ -158,7 +166,7 @@ try {
         }
     }
 
-    // Store the prediction result for polling
+    // Only store the raw webhook payload if we haven't written a panel result
     $writeResult = file_put_contents($tempFile, $payload);
     if ($writeResult === false) {
         $error = error_get_last();
