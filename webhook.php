@@ -88,8 +88,16 @@ try {
             if ($data['status'] === 'succeeded' && !empty($data['output'])) {
                 $logger->info("Cartoonification completed successfully", [
                     'original_image' => $pending['original_image'],
-                    'cartoonified_url' => $data['output'][0]
+                    'cartoonified_url' => is_array($data['output']) ? $data['output'][0] : $data['output']
                 ]);
+
+                // Store cartoonification result in a separate file
+                $cartoonifiedFile = $tempPath . "cartoonified_{$predictionId}.json";
+                file_put_contents($cartoonifiedFile, json_encode([
+                    'original_image' => $pending['original_image'],
+                    'cartoonified_url' => is_array($data['output']) ? $data['output'][0] : $data['output'],
+                    'completed_at' => time()
+                ]));
 
                 // Clean up the pending file
                 @unlink($pendingFile);
