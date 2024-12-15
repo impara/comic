@@ -132,8 +132,18 @@ try {
                         $panelData['scene_description']
                     );
 
-                    // Store the panel result
-                    file_put_contents($resultFile, json_encode($panelResult));
+                    // Store the panel result in a new file to avoid overwriting the cartoonification result
+                    $panelResultFile = $tempPath . "panel_{$predictionId}.json";
+                    file_put_contents($panelResultFile, json_encode($panelResult));
+
+                    // Update the original result file to point to the panel result
+                    $result = [
+                        'status' => 'succeeded',
+                        'output' => $panelResult['output'] ?? null,
+                        'completed_at' => date('c'),
+                        'panel_data' => $panelResult
+                    ];
+                    file_put_contents($resultFile, json_encode($result));
                 }
             } elseif ($data['status'] === 'failed') {
                 $logger->error("Cartoonification failed", [
