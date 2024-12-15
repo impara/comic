@@ -40,9 +40,18 @@ class ComicGenerator
             $characterImages = [];
             $pendingCartoonifications = [];
             foreach ($characters as $index => $character) {
-                if (!isset($character['image'])) {
+                if (!isset($character['image']) && !isset($character['cartoonified_image'])) {
                     throw new Exception("Character image is required");
                 }
+
+                // If character already has a cartoonified image, use it directly
+                if (isset($character['cartoonified_image'])) {
+                    $processedCharacters[] = $character;
+                    $characterImages[$index] = $character['cartoonified_image'];
+                    continue;
+                }
+
+                // Otherwise process the character
                 $processedCharacter = $this->characterProcessor->processCharacter($character);
                 $processedCharacters[] = $processedCharacter;
 

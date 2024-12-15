@@ -123,6 +123,7 @@ try {
 
                     // Update the character with cartoonified image
                     $panelData['characters'][0]['cartoonified_image'] = is_array($data['output']) ? $data['output'][0] : $data['output'];
+                    $panelData['characters'][0]['image'] = is_array($data['output']) ? $data['output'][0] : $data['output'];
 
                     // Create a new ComicGenerator instance
                     require_once __DIR__ . '/models/ComicGenerator.php';
@@ -139,30 +140,22 @@ try {
                         'panel_result' => $panelResult
                     ]);
 
-                    // Only write to the prediction file if we have a final result
-                    if (isset($panelResult['status']) && $panelResult['status'] === 'succeeded' && isset($panelResult['output'])) {
-                        // Write the final panel result directly to the prediction file
-                        file_put_contents($resultFile, json_encode([
-                            'id' => $predictionId,
-                            'status' => 'succeeded',
-                            'output' => $panelResult['output'],
-                            'completed_at' => date('c')
-                        ]));
+                    // Write the final panel result
+                    file_put_contents($resultFile, json_encode([
+                        'id' => $predictionId,
+                        'status' => 'succeeded',
+                        'output' => $panelResult['output'] ?? null,
+                        'type' => 'panel',
+                        'completed_at' => date('c')
+                    ]));
 
-                        $logger->info("Final panel result written", [
-                            'file' => $resultFile,
-                            'panel_result' => $panelResult
-                        ]);
+                    $logger->info("Final panel result written", [
+                        'file' => $resultFile,
+                        'panel_result' => $panelResult
+                    ]);
 
-                        // Skip writing raw webhook payload since we've written the panel result
-                        return;
-                    } else {
-                        // If panel generation is still processing, log it but don't update the file
-                        $logger->info("Panel generation still processing", [
-                            'status' => $panelResult['status'] ?? 'unknown',
-                            'pending_predictions' => $panelResult['pending_predictions'] ?? []
-                        ]);
-                    }
+                    // Skip writing raw webhook payload since we've written the panel result
+                    return;
                 }
             } elseif ($data['status'] === 'failed') {
                 $logger->error("Cartoonification failed", [
