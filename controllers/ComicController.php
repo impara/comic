@@ -39,19 +39,23 @@ class ComicController
         $rawInput = file_get_contents('php://input');
         $this->logger->info('Received request', [
             'raw_input_length' => strlen($rawInput),
-            'content_type' => $_SERVER['CONTENT_TYPE'] ?? 'not set'
+            'content_type' => $_SERVER['CONTENT_TYPE'] ?? 'not set',
+            'raw_input' => $rawInput // Log the raw input
         ]);
 
         $input = json_decode($rawInput, true);
         if (!$input) {
             $this->logger->error('Invalid JSON input', [
                 'json_error' => json_last_error_msg(),
-                'raw_input' => substr($rawInput, 0, 1000) // Log first 1000 chars
+                'raw_input' => $rawInput,
+                'content_type' => $_SERVER['CONTENT_TYPE'] ?? 'not set',
+                'request_method' => $_SERVER['REQUEST_METHOD'],
+                'headers' => getallheaders()
             ]);
             http_response_code(400);
             echo json_encode([
                 'success' => false,
-                'message' => 'Invalid JSON input'
+                'message' => 'Invalid JSON input: ' . json_last_error_msg()
             ]);
             return;
         }

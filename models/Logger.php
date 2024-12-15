@@ -16,7 +16,17 @@ class Logger implements LoggerInterface
     public function __construct()
     {
         $config = Config::getInstance();
-        $this->logDir = $config->getLogsPath();
+
+        // Determine if we're in production
+        $isProduction = isset($_SERVER['SERVER_NAME']) && strpos($_SERVER['SERVER_NAME'], 'comic.amertech.online') !== false;
+
+        // Set paths based on environment
+        if ($isProduction) {
+            $this->logDir = '/var/www/comic.amertech.online/logs/';
+        } else {
+            $this->logDir = __DIR__ . '/../logs/';
+        }
+
         $this->logFile = $this->logDir . 'comic_generator.log';
         $this->maxFileSize = 5 * 1024 * 1024; // 5MB
         $this->maxFiles = 3;
@@ -26,10 +36,41 @@ class Logger implements LoggerInterface
 
     private function ensureLogDirectory(): void
     {
+        // Create directory if it doesn't exist
         if (!file_exists($this->logDir)) {
-            if (!mkdir($this->logDir, 0755, true)) {
+            if (!mkdir($this->logDir, 0777, true)) {
+                error_log("Failed to create log directory: {$this->logDir}");
                 throw new RuntimeException("Failed to create log directory: {$this->logDir}");
             }
+            // Set directory permissions
+            chmod($this->logDir, 0777);
+            // Only try to change owner in production
+            if (function_exists('posix_getuid') && posix_getuid() === 0) {
+                chown($this->logDir, 'www-data');
+                chgrp($this->logDir, 'www-data');
+            }
+        }
+
+        // Create log file if it doesn't exist
+        if (!file_exists($this->logFile)) {
+            if (touch($this->logFile)) {
+                // Set file permissions
+                chmod($this->logFile, 0666);
+                // Only try to change owner in production
+                if (function_exists('posix_getuid') && posix_getuid() === 0) {
+                    chown($this->logFile, 'www-data');
+                    chgrp($this->logFile, 'www-data');
+                }
+            } else {
+                error_log("Failed to create log file: {$this->logFile}");
+                throw new RuntimeException("Failed to create log file: {$this->logFile}");
+            }
+        }
+
+        // Double check permissions
+        if (!is_writable($this->logFile)) {
+            error_log("Log file is not writable: {$this->logFile}");
+            throw new RuntimeException("Log file is not writable: {$this->logFile}");
         }
     }
 

@@ -29,7 +29,12 @@ export const FormHandler = {
     bindEvents() {
         // Story input handling
         const $storyInput = $('#story-input');
-        $storyInput.on('input', () => this.updateCharacterCount());
+        $storyInput.on('input', () => {
+            this.updateCharacterCount();
+            // Store story in session storage on input
+            const story = $storyInput.val().trim();
+            sessionStorage.setItem('userStory', story);
+        });
 
         // Example prompts
         $(document).on('click', '.example-prompt', (e) => this.handleExamplePrompt(e));
@@ -361,6 +366,9 @@ export const FormHandler = {
 
         this.selectedStyle = $selected.data('style');
         this.selectedStyleImage = $selected.find('img').attr('src');
+
+        // Store style immediately in session storage
+        sessionStorage.setItem('selectedStyle', this.selectedStyle);
 
         // Update preview immediately
         this.updateLivePreview();

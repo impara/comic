@@ -32,7 +32,9 @@ export const ComicGenerator = {
     getApiUrl(endpoint) {
         // Ensure endpoint has no leading slash and combine with base path
         endpoint = endpoint.replace(/^\/+/, '');
-        const url = new URL(endpoint, window.location.href).href;
+        // Use current window location as base URL
+        const baseUrl = window.location.origin;
+        const url = new URL(endpoint, baseUrl).href;
         console.log('Generated API URL:', url);
         return url;
     },
@@ -40,6 +42,14 @@ export const ComicGenerator = {
     handleComicGeneration(e) {
         e.preventDefault();
         console.log('Comic generation started');
+
+        // Debug: Log all session storage data
+        console.log('All session storage data:', {
+            userStory: sessionStorage.getItem('userStory'),
+            selectedStyle: sessionStorage.getItem('selectedStyle'),
+            selectedCharacters: sessionStorage.getItem('selectedCharacters'),
+            characterData: sessionStorage.getItem('characterData')
+        });
 
         // Get story and style from session storage
         const userStory = sessionStorage.getItem('userStory');
@@ -130,11 +140,13 @@ export const ComicGenerator = {
     },
 
     generateComic(formData) {
+        // Detailed request logging
         console.log('Initiating comic generation with data:', {
             story_length: formData.scene_description?.length,
             art_style: formData.art_style,
             character_count: formData.characters?.length,
-            characters: formData.characters
+            characters: formData.characters,
+            raw_data: JSON.stringify(formData, null, 2)
         });
 
         const apiUrl = this.getApiUrl('api.php');
@@ -143,10 +155,14 @@ export const ComicGenerator = {
         // Add loading indicator to UI
         $('#debugInfo').html('<p>Sending request to server...</p>');
 
+        // Log the exact request payload
+        const requestPayload = JSON.stringify(formData);
+        console.log('Request payload:', requestPayload);
+
         $.ajax({
             url: apiUrl,
             type: 'POST',
-            data: JSON.stringify(formData),
+            data: requestPayload,
             contentType: 'application/json',
             dataType: 'json',
             success: (response) => {

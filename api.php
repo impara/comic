@@ -7,9 +7,41 @@ EnvLoader::load(__DIR__ . '/.env');
 
 // Enable error logging
 error_reporting(E_ALL);
-ini_set('display_errors', 1);
+ini_set('display_errors', 0);
 ini_set('log_errors', 1);
-ini_set('error_log', __DIR__ . '/logs/php_errors.log');
+
+// Determine environment
+$isProduction = isset($_SERVER['SERVER_NAME']) && strpos($_SERVER['SERVER_NAME'], 'comic.amertech.online') !== false;
+
+// Set up logging directory
+if ($isProduction) {
+    $logsDir = '/var/www/comic.amertech.online/logs';
+} else {
+    $logsDir = __DIR__ . '/logs';
+}
+$errorLogFile = $logsDir . '/php_errors.log';
+
+// Create directory if it doesn't exist
+if (!file_exists($logsDir)) {
+    mkdir($logsDir, 0777, true);
+    if ($isProduction && function_exists('posix_getuid') && posix_getuid() === 0) {
+        chown($logsDir, 'www-data');
+        chgrp($logsDir, 'www-data');
+    }
+}
+
+// Create and set permissions for log file
+if (!file_exists($errorLogFile)) {
+    touch($errorLogFile);
+    chmod($errorLogFile, 0666);
+    if ($isProduction && function_exists('posix_getuid') && posix_getuid() === 0) {
+        chown($errorLogFile, 'www-data');
+        chgrp($errorLogFile, 'www-data');
+    }
+}
+
+// Set error log path
+ini_set('error_log', $errorLogFile);
 
 // Add detailed error handler
 set_error_handler(function ($errno, $errstr, $errfile, $errline) {
