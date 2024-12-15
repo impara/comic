@@ -123,30 +123,24 @@ class CharacterProcessor
                 throw new Exception("Character image is required");
             }
 
-            // Check if this character has already been cartoonified
-            $tempPath = $this->config->getTempPath();
-            $cartoonifiedFile = $tempPath . "cartoonified_" . basename($character['image']) . ".json";
-
-            if (file_exists($cartoonifiedFile)) {
-                // Use existing cartoonified version
-                $cartoonified = json_decode(file_get_contents($cartoonifiedFile), true);
-                if (!empty($cartoonified['cartoonified_url'])) {
-                    return [
-                        'id' => $character['id'],
-                        'name' => $character['name'],
-                        'description' => $character['description'],
-                        'image' => $character['image'],
-                        'cartoonified_image' => $cartoonified['cartoonified_url'],
-                        'options' => $character['options'] ?? []
-                    ];
-                }
+            // Skip cartoonification if the image is already a Replicate URL
+            if (strpos($character['image'], 'replicate.delivery') !== false) {
+                return [
+                    'id' => $character['id'],
+                    'name' => $character['name'],
+                    'description' => $character['description'],
+                    'image' => $character['image'],
+                    'cartoonified_image' => $character['image'],
+                    'options' => $character['options'] ?? []
+                ];
             }
 
-            // Start cartoonification if not already done
-            $result = $this->cartoonifyCharacter($character['image']);
+            // Start cartoonification
+            $result = $this->cartoonifyCharacter($character['image'], $character['options'] ?? []);
             $predictionId = $result['id'];
 
             // Create a pending file to track this cartoonification
+            $tempPath = $this->config->getTempPath();
             $pendingFile = $tempPath . "pending_{$predictionId}.json";
             file_put_contents($pendingFile, json_encode([
                 'prediction_id' => $predictionId,
@@ -158,9 +152,10 @@ class CharacterProcessor
             $maxAttempts = 30;
             $attempt = 0;
             while ($attempt < $maxAttempts) {
-                if (file_exists($cartoonifiedFile)) {
-                    $cartoonified = json_decode(file_get_contents($cartoonifiedFile), true);
-                    if (!empty($cartoonified['cartoonified_url'])) {
+                $resultFile = $tempPath . "{$predictionId}.json";
+                if (file_exists($resultFile)) {
+                    $result = json_decode(file_get_contents($resultFile), true);
+                    if (isset($result['output']) && is_array($result['output']) && !empty($result['output'][0])) {
                         // Clean up the pending file
                         @unlink($pendingFile);
 
@@ -169,7 +164,7 @@ class CharacterProcessor
                             'name' => $character['name'],
                             'description' => $character['description'],
                             'image' => $character['image'],
-                            'cartoonified_image' => $cartoonified['cartoonified_url'],
+                            'cartoonified_image' => $result['output'][0],
                             'options' => $character['options'] ?? []
                         ];
                     }

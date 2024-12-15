@@ -74,7 +74,37 @@ try {
         'permissions' => substr(sprintf('%o', fileperms($tempPath)), -4)
     ]);
 
-    // Try to write the file with error handling
+    // Check if this is a cartoonification completion
+    $pendingFiles = glob($tempPath . "pending_*.json");
+    foreach ($pendingFiles as $pendingFile) {
+        $pending = json_decode(file_get_contents($pendingFile), true);
+        if ($pending && isset($pending['prediction_id']) && $pending['prediction_id'] === $predictionId) {
+            $logger->info("Found matching pending cartoonification", [
+                'pending_file' => $pendingFile,
+                'prediction_id' => $predictionId
+            ]);
+
+            // Store the result directly
+            if ($data['status'] === 'succeeded' && !empty($data['output'])) {
+                $logger->info("Cartoonification completed successfully", [
+                    'original_image' => $pending['original_image'],
+                    'cartoonified_url' => $data['output'][0]
+                ]);
+
+                // Clean up the pending file
+                @unlink($pendingFile);
+            } elseif ($data['status'] === 'failed') {
+                $logger->error("Cartoonification failed", [
+                    'error' => $data['error'] ?? 'Unknown error',
+                    'original_image' => $pending['original_image']
+                ]);
+                @unlink($pendingFile);
+            }
+            break;
+        }
+    }
+
+    // Store the prediction result for polling
     $writeResult = file_put_contents($tempFile, $payload);
     if ($writeResult === false) {
         $error = error_get_last();
@@ -91,40 +121,6 @@ try {
         'prediction_id' => $predictionId,
         'bytes_written' => $writeResult
     ]);
-
-    // Check if this is a cartoonification completion
-    $pendingFiles = glob($tempPath . "pending_*.json");
-    foreach ($pendingFiles as $pendingFile) {
-        $pending = json_decode(file_get_contents($pendingFile), true);
-        if ($pending && isset($pending['prediction_id']) && $pending['prediction_id'] === $predictionId) {
-            // Update the original image with the cartoonified version
-            if ($data['status'] === 'succeeded' && !empty($data['output'])) {
-                $logger->info("Updating cartoonified image", [
-                    'original' => $pending['original_image'],
-                    'cartoonified' => $data['output']
-                ]);
-
-                // Store the cartoonified URL for the original image
-                $cartoonifiedFile = $tempPath . "cartoonified_" . basename($pending['original_image']) . ".json";
-                file_put_contents($cartoonifiedFile, json_encode([
-                    'original_url' => $pending['original_image'],
-                    'cartoonified_url' => $data['output'],
-                    'completed_at' => time()
-                ]));
-
-                // Clean up the pending file
-                unlink($pendingFile);
-                $logger->info("Cartoonification process completed successfully");
-            } elseif ($data['status'] === 'failed') {
-                $logger->error("Cartoonification failed", [
-                    'error' => $data['error'] ?? 'Unknown error',
-                    'original_image' => $pending['original_image']
-                ]);
-                unlink($pendingFile);
-            }
-            break;
-        }
-    }
 
     // Return success response
     http_response_code(200);
