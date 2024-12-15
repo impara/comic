@@ -120,25 +120,24 @@ try {
                     'error' => $data['error'] ?? 'Unknown error',
                     'original_image' => $pending['original_image']
                 ]);
-                unlink($pendingFile); // Clean up pending file even on failure
+                unlink($pendingFile);
             }
             break;
         }
     }
 
+    // Return success response
     http_response_code(200);
-    echo json_encode([
-        'status' => 'success',
-        'message' => 'Webhook processed successfully'
-    ]);
+    echo json_encode(['success' => true]);
 } catch (Exception $e) {
     $logger->error("Webhook processing failed", [
         'error' => $e->getMessage(),
         'trace' => $e->getTraceAsString()
     ]);
+
     http_response_code(500);
     echo json_encode([
-        'status' => 'error',
-        'message' => $e->getMessage()
+        'success' => false,
+        'error' => $e->getMessage()
     ]);
 }

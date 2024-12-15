@@ -158,52 +158,44 @@ class CharacterProcessor
                 return $imageData;
             }
 
-            $this->logger->info("Cartoonifying image", [
-                'image_length' => strlen($imageData),
-                'options' => []
-            ]);
+            // Start cartoonification
+            $result = $this->cartoonifyCharacter($imageData);
+            $predictionId = $result['id'];
 
-            // Save the image first
-            $savedImagePath = '';
-            if (filter_var($imageData, FILTER_VALIDATE_URL)) {
-                $savedImagePath = $this->fileManager->saveImageFromUrl($imageData, 'character');
-            } elseif (preg_match('/^data:image\/(\w+);base64,/', $imageData)) {
-                $savedImagePath = $this->fileManager->saveBase64Image($imageData, 'character');
-            } else {
-                throw new Exception("Invalid image data format");
-            }
-
-            // Convert saved path to URL
-            $baseUrl = $this->config->getBaseUrl();
-            $filename = basename($savedImagePath);
-            $finalUrl = $baseUrl . '/public/generated/' . $filename;
-
-            $this->logger->info("Constructed image URL", [
-                'original_path' => $savedImagePath,
-                'filename' => $filename,
-                'base_url' => $baseUrl,
-                'final_url' => $finalUrl
-            ]);
-
-            // Start cartoonification process - this will trigger webhook when done
-            $prediction = $this->replicateClient->cartoonify($finalUrl);
-
-            // Store the prediction ID for webhook processing
-            $tempFile = $this->config->getTempPath() . "pending_" . basename($savedImagePath) . ".json";
-            file_put_contents($tempFile, json_encode([
-                'prediction_id' => $prediction['id'],
-                'original_image' => $finalUrl,
-                'created_at' => time()
+            // Create a pending file to track this cartoonification
+            $tempPath = $this->config->getTempPath();
+            $pendingFile = $tempPath . "pending_{$predictionId}.json";
+            file_put_contents($pendingFile, json_encode([
+                'prediction_id' => $predictionId,
+                'original_image' => $imageData,
+                'started_at' => time()
             ]));
 
-            // Return the original image URL - it will be updated by webhook when processing completes
-            return $finalUrl;
+            // Wait for cartoonification to complete (max 30 seconds)
+            $maxAttempts = 30;
+            $attempt = 0;
+            while ($attempt < $maxAttempts) {
+                // Check if cartoonified file exists
+                $cartoonifiedFile = $tempPath . "cartoonified_" . basename($imageData) . ".json";
+                if (file_exists($cartoonifiedFile)) {
+                    $cartoonified = json_decode(file_get_contents($cartoonifiedFile), true);
+                    if (isset($cartoonified['cartoonified_url'])) {
+                        // Clean up the pending file
+                        @unlink($pendingFile);
+                        return $cartoonified['cartoonified_url'];
+                    }
+                }
+                sleep(1);
+                $attempt++;
+            }
+
+            throw new Exception("Timed out waiting for cartoonification to complete");
         } catch (Exception $e) {
-            $this->logger->error("Image processing failed", [
+            $this->logger->error("Failed to process image", [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString()
             ]);
-            throw new Exception("Failed to process character image: " . $e->getMessage());
+            throw $e;
         }
     }
 }
