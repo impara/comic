@@ -97,15 +97,18 @@ try {
         ]);
         if ($pending && isset($pending['prediction_id']) && $pending['prediction_id'] === $predictionId) {
             $logger->error("TEST_LOG - Found matching cartoonification", [
-                'pending_file' => $pendingFile,
+                'pending_file' => basename($pendingFile),
                 'prediction_id' => $predictionId,
-                'has_panel_data' => isset($pending['panel_data'])
+                'has_panel_data' => isset($pending['panel_data']),
+                'raw_pending' => $pending
             ]);
 
             // Store the result directly
             if ($data['status'] === 'succeeded' && !empty($data['output'])) {
                 $logger->error("TEST_LOG - Cartoonification succeeded", [
-                    'output_url' => is_array($data['output']) ? $data['output'][0] : $data['output']
+                    'output_url' => is_array($data['output']) ? $data['output'][0] : $data['output'],
+                    'has_panel_data' => isset($pending['panel_data']),
+                    'panel_data_type' => isset($pending['panel_data']) ? gettype($pending['panel_data']) : 'none'
                 ]);
 
                 // If this is a cartoonification completion, trigger panel generation
@@ -120,25 +123,30 @@ try {
                     }
 
                     // Update cartoonified_image for the character(s)
-                    // Assuming we have only one character or know the correct index:
-                    $panelData['characters'][0]['cartoonified_image'] = is_array($data['output']) ? $data['output'][0] : $data['output'];
+                    $cartoonifiedUrl = is_array($data['output']) ? $data['output'][0] : $data['output'];
+                    $panelData['characters'][0]['cartoonified_image'] = $cartoonifiedUrl;
 
-                    // Log that we're updating the character with the cartoonified image
-                    $logger->error("TEST_LOG - Setting cartoonified_image for character", [
+                    // Log the updated panel data before generating panel
+                    $logger->error("TEST_LOG - Updated panel data with cartoonified image", [
                         'character_id' => $panelData['characters'][0]['id'],
-                        'cartoonified_url' => $panelData['characters'][0]['cartoonified_image']
+                        'cartoonified_url' => $cartoonifiedUrl,
+                        'scene_description' => $panelData['scene_description'],
+                        'full_panel_data' => $panelData
                     ]);
 
                     // Now call generatePanel() with updated panelData
                     require_once __DIR__ . '/models/ComicGenerator.php';
                     $comicGenerator = new ComicGenerator($logger);
 
-                    $logger->error("TEST_LOG - About to call generatePanel after setting cartoonified_image", [
+                    $logger->error("TEST_LOG - Calling generatePanel with cartoonified character", [
                         'character_count' => count($panelData['characters']),
-                        'first_character' => isset($panelData['characters'][0]) ? [
+                        'first_character' => [
                             'id' => $panelData['characters'][0]['id'] ?? 'unknown',
-                            'has_cartoonified' => isset($panelData['characters'][0]['cartoonified_image'])
-                        ] : null
+                            'has_cartoonified' => isset($panelData['characters'][0]['cartoonified_image']),
+                            'cartoonified_url' => $panelData['characters'][0]['cartoonified_image'] ?? null,
+                            'is_replicate_url' => isset($panelData['characters'][0]['cartoonified_image']) &&
+                                strpos($panelData['characters'][0]['cartoonified_image'], 'replicate.delivery') !== false
+                        ]
                     ]);
 
                     $panelResult = $comicGenerator->generatePanel(
@@ -147,11 +155,12 @@ try {
                         $predictionId
                     );
 
-                    $logger->error("TEST_LOG - Panel generation completed", [
+                    $logger->error("TEST_LOG - Panel generation completed after cartoonification", [
                         'result' => [
                             'status' => $panelResult['status'] ?? 'unknown',
                             'has_output' => isset($panelResult['output']),
-                            'prediction_id' => $predictionId
+                            'prediction_id' => $predictionId,
+                            'panel_id' => $panelResult['id'] ?? null
                         ]
                     ]);
 
