@@ -210,18 +210,14 @@ export const ComicGenerator = {
     },
 
     checkResult(predictionId) {
-        console.log('Checking result for prediction:', predictionId);
-        const url = this.getApiUrl(`public/temp/${predictionId}.json`);
-        console.log('Polling URL:', url);
-
-        // Initialize cartoonification tracking if not exists
-        if (!this.cartoonificationState) {
-            this.cartoonificationState = new Map();
-        }
+        const apiUrl = this.getApiUrl(`public/temp/${predictionId}.json`);
+        console.log('Generated API URL:', apiUrl);
+        console.log('Polling URL:', apiUrl);
 
         $.ajax({
-            url: url,
+            url: apiUrl,
             type: 'GET',
+            dataType: 'json',
             success: (result) => {
                 console.log('Result check response:', {
                     status: result.status,
@@ -234,6 +230,13 @@ export const ComicGenerator = {
 
                 if (result.status === 'succeeded') {
                     if (result.type === 'panel') {
+                        // Check if we have panel output
+                        if (result.output) {
+                            console.log('Panel generation completed with output:', result.output);
+                            this.displayGeneratedComic(result);
+                            return;
+                        }
+
                         // Check if we have pending cartoonifications
                         if (result.pending_predictions && result.pending_predictions.length > 0) {
                             console.log('Panel has pending cartoonifications:', result.pending_predictions);
@@ -262,46 +265,15 @@ export const ComicGenerator = {
                                     setTimeout(() => this.checkResult(predId), 5000);
                                 }
                             });
+
+                            // Continue polling this panel
+                            setTimeout(() => this.checkResult(predictionId), 5000);
                             return;
                         }
 
-                        // Check if this is a final panel with cartoonification info
-                        if (result.debug_info?.used_cartoonified_images) {
-                            console.log('Panel completed with cartoonified images:', result.debug_info);
-
-                            // Log cartoonification state for debugging
-                            console.log('Final cartoonification state:', {
-                                tracked_items: Array.from(this.cartoonificationState.entries()),
-                                panel_cartoonified_images: result.debug_info.used_cartoonified_images,
-                                cartoonification_status: result.debug_info.cartoonification_status
-                            });
-
-                            // Update progress bar to 100%
-                            $('.progress-bar').css('width', '100%');
-
-                            // Update UI with cartoonification status
-                            $('#debugInfo').html(`
-                                <p>Panel generation completed!</p>
-                                <p>Cartoonification status:</p>
-                                <ul>
-                                    <li>Total images: ${result.debug_info.cartoonification_status.total_images}</li>
-                                    <li>Valid images: ${result.debug_info.cartoonification_status.valid_images}</li>
-                                    <li>Completed at: ${result.debug_info.cartoonification_status.timestamp}</li>
-                                </ul>
-                            `);
-
-                            this.displayGeneratedComic(result);
-                        } else {
-                            console.error('Panel completed but may be missing cartoonification:', result);
-                            // Still display but log the warning and show warning in UI
-                            $('#debugInfo').html(`
-                                <div class="alert alert-warning">
-                                    <p><strong>Warning:</strong> Panel completed but cartoonification status is unclear.</p>
-                                    <p>The panel will still be displayed, but characters may not be properly cartoonified.</p>
-                                </div>
-                            `);
-                            this.displayGeneratedComic(result);
-                        }
+                        // If we get here, panel is complete but may be missing output
+                        console.error('Panel completed but missing output:', result);
+                        this.handleGenerationError('Panel generation completed but output is missing');
                     } else if (result.type === 'cartoonification') {
                         console.log('Cartoonification completed:', result);
 
@@ -331,46 +303,26 @@ export const ComicGenerator = {
                             setTimeout(() => this.checkResult(result.original_prediction_id), 5000);
                         }
                     }
-                } else if (result.status === 'processing') {
-                    // If processing, check again after delay
-                    console.log('Still processing, checking again in 5 seconds');
-
-                    // Update UI with more detailed status
-                    const processingType = result.type || 'unknown';
-                    const pendingCount = result.pending_predictions?.length || 0;
-
-                    // Update progress bar based on type
-                    if (processingType === 'cartoonification') {
-                        $('.progress-bar').css('width', '35%');
-                    } else if (processingType === 'panel') {
-                        $('.progress-bar').css('width', '75%');
-                    }
-
-                    $('#debugInfo').html(`
-                        <p>Processing ${processingType}...</p>
-                        ${pendingCount ? `<p>Pending cartoonifications: ${pendingCount}</p>` : ''}
-                        <p>Checking again in 5 seconds...</p>
-                    `);
-
-                    setTimeout(() => this.checkResult(predictionId), 5000);
                 } else if (result.status === 'failed') {
-                    console.error('Generation failed:', result.error);
+                    console.error('Generation failed:', result);
                     this.handleGenerationError(result.error || 'Generation failed');
+                } else {
+                    // Continue polling for incomplete status
+                    setTimeout(() => this.checkResult(predictionId), 5000);
                 }
             },
             error: (xhr, status, error) => {
-                console.error('Failed to check result:', {
+                console.error('Error checking result:', {
                     status: status,
                     error: error,
-                    prediction_id: predictionId
+                    response: xhr.responseText
                 });
 
-                // If the error is 404, the file might not be ready yet
+                // If file not found, wait and retry
                 if (xhr.status === 404) {
-                    console.log('Result file not found yet, retrying in 5 seconds');
                     setTimeout(() => this.checkResult(predictionId), 5000);
                 } else {
-                    this.handleGenerationError('Failed to check generation status: ' + error);
+                    this.handleGenerationError('Failed to check generation status');
                 }
             }
         });
