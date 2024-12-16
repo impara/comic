@@ -149,12 +149,13 @@ try {
 
                     $panelData['characters'][0]['cartoonified_image'] = $cartoonifiedUrl;
 
-                    // Store cartoonification mapping
+                    // Store cartoonification mapping for verification
                     $cartoonificationMappingFile = $tempPath . "cartoonification_{$predictionId}.json";
                     file_put_contents($cartoonificationMappingFile, json_encode([
                         'prediction_id' => $predictionId,
                         'character_id' => $panelData['characters'][0]['id'],
                         'cartoonified_url' => $cartoonifiedUrl,
+                        'original_prediction_id' => $pending['original_prediction_id'],
                         'created_at' => date('c')
                     ]));
 
@@ -183,14 +184,26 @@ try {
                                 strpos($panelData['characters'][0]['cartoonified_image'], 'replicate.delivery') !== false
                         ],
                         'pending_file' => basename($pendingFile),
-                        'prediction_id' => $predictionId
+                        'prediction_id' => $predictionId,
+                        'original_prediction_id' => $pending['original_prediction_id']
                     ]);
 
                     $panelResult = $comicGenerator->generatePanel(
                         $panelData['characters'],
                         $panelData['scene_description'],
-                        $predictionId
+                        $pending['original_prediction_id']
                     );
+
+                    // Store the mapping between cartoonification and panel
+                    if (isset($panelResult['id'])) {
+                        $mappingFile = $tempPath . "mapping_{$panelResult['id']}.json";
+                        file_put_contents($mappingFile, json_encode([
+                            'original_prediction_id' => $pending['original_prediction_id'],
+                            'panel_prediction_id' => $panelResult['id'],
+                            'cartoonified_image' => $cartoonifiedUrl,
+                            'created_at' => date('c')
+                        ]));
+                    }
 
                     $logger->error("TEST_LOG - Panel generation completed after cartoonification", [
                         'result' => [
@@ -198,7 +211,8 @@ try {
                             'has_output' => isset($panelResult['output']),
                             'prediction_id' => $predictionId,
                             'panel_id' => $panelResult['id'] ?? null,
-                            'cartoonified_url' => $cartoonifiedUrl
+                            'cartoonified_url' => $cartoonifiedUrl,
+                            'original_prediction_id' => $pending['original_prediction_id']
                         ]
                     ]);
 

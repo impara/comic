@@ -65,20 +65,48 @@ class ComicGenerator
                 continue;
             }
 
-            // Otherwise process the character
-            $processedCharacter = $this->characterProcessor->processCharacter($character);
+            // Otherwise process the character for cartoonification
+            try {
+                // Create panel data for cartoonification
+                $panelData = [
+                    'characters' => [$character],
+                    'scene_description' => $sceneDescription
+                ];
 
-            // If cartoonification is pending, add to pending list
-            if (isset($processedCharacter['prediction_id'])) {
-                $pendingCartoonifications[] = $processedCharacter['prediction_id'];
-                $this->logger->error("TEST_LOG - Character pending cartoonification", [
-                    'character_id' => $processedCharacter['id'] ?? 'unknown',
-                    'prediction_id' => $processedCharacter['prediction_id'],
-                    'index' => $index
+                // Start cartoonification process
+                $cartoonificationResult = $this->characterProcessor->processCharacter($character);
+
+                if (isset($cartoonificationResult['prediction_id'])) {
+                    // Store pending data for webhook processing
+                    $tempPath = $this->config->getTempPath();
+                    $pendingFile = $tempPath . "pending_{$cartoonificationResult['prediction_id']}.json";
+
+                    file_put_contents($pendingFile, json_encode([
+                        'prediction_id' => $cartoonificationResult['prediction_id'],
+                        'original_image' => $character['image'],
+                        'character_data' => $character,
+                        'panel_data' => json_encode($panelData),
+                        'original_prediction_id' => $originalPredictionId,
+                        'started_at' => time()
+                    ]));
+
+                    $pendingCartoonifications[] = $cartoonificationResult['prediction_id'];
+
+                    $this->logger->error("TEST_LOG - Started cartoonification process", [
+                        'character_id' => $character['id'],
+                        'prediction_id' => $cartoonificationResult['prediction_id'],
+                        'pending_file' => basename($pendingFile)
+                    ]);
+                }
+
+                $processedCharacters[] = $cartoonificationResult;
+            } catch (Exception $e) {
+                $this->logger->error("Failed to process character for cartoonification", [
+                    'character_id' => $character['id'],
+                    'error' => $e->getMessage()
                 ]);
+                throw $e;
             }
-
-            $processedCharacters[] = $processedCharacter;
         }
 
         // If there are pending cartoonifications, return early with status
@@ -86,7 +114,8 @@ class ComicGenerator
             return [
                 'status' => 'processing',
                 'message' => 'Waiting for cartoonification to complete',
-                'pending_predictions' => $pendingCartoonifications
+                'pending_predictions' => $pendingCartoonifications,
+                'original_prediction_id' => $originalPredictionId
             ];
         }
 
