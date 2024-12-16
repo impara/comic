@@ -245,20 +245,27 @@ export const ComicGenerator = {
         }
 
         // Try all possible file patterns
+        const panelApiUrl = this.getApiUrl(`public/temp/panel_${predictionId}.json`);
         const pendingApiUrl = this.getApiUrl(`public/temp/pending_${predictionId}.json`);
         const directApiUrl = this.getApiUrl(`public/temp/${predictionId}.json`);
-        const cartoonificationApiUrl = this.getApiUrl(`public/temp/cartoonification_${predictionId}.json`);
-        const stateApiUrl = this.getApiUrl(`public/temp/state_${predictionId}.json`);
+        const mappingApiUrl = this.getApiUrl(`public/temp/mapping_${predictionId}.json`);
 
         console.log('Checking URLs:', {
+            panel: panelApiUrl,
             pending: pendingApiUrl,
             direct: directApiUrl,
-            cartoonification: cartoonificationApiUrl,
-            state: stateApiUrl
+            mapping: mappingApiUrl
         });
 
-        // Try files in order: direct -> pending -> cartoonification -> state
-        this.tryLoadFile(directApiUrl)
+        // Try files in order: panel -> direct -> pending -> mapping
+        this.tryLoadFile(panelApiUrl)
+            .then(result => {
+                if (result) {
+                    this.handleResultResponse(result, predictionId);
+                } else {
+                    return this.tryLoadFile(directApiUrl);
+                }
+            })
             .then(result => {
                 if (result) {
                     this.handleResultResponse(result, predictionId);
@@ -270,32 +277,25 @@ export const ComicGenerator = {
                 if (result) {
                     this.handleResultResponse(result, predictionId);
                 } else {
-                    return this.tryLoadFile(cartoonificationApiUrl);
+                    return this.tryLoadFile(mappingApiUrl);
                 }
             })
             .then(result => {
                 if (result) {
-                    // Handle cartoonification mapping
-                    if (result.cartoonified_url) {
+                    // Handle mapping file
+                    if (result.cartoonified_images) {
                         this.cartoonificationState.set(predictionId, {
                             status: 'completed',
-                            output: result.cartoonified_url,
-                            completed_at: new Date().getTime(),
+                            output: result.cartoonified_images[0],
+                            completed_at: new Date(result.created_at).getTime(),
                             original_prediction_id: result.original_prediction_id
                         });
+
+                        // Continue polling original panel
+                        if (result.panel_prediction_id) {
+                            setTimeout(() => this.checkResult(result.panel_prediction_id), 5000);
+                        }
                     }
-                    // Continue polling original panel
-                    if (result.original_prediction_id) {
-                        setTimeout(() => this.checkResult(result.original_prediction_id), 5000);
-                    }
-                } else {
-                    return this.tryLoadFile(stateApiUrl);
-                }
-            })
-            .then(result => {
-                if (result) {
-                    // Handle state file
-                    this.handleStateFile(result, predictionId);
                 } else {
                     // No files found, continue polling
                     setTimeout(() => this.checkResult(predictionId), 5000);
@@ -364,8 +364,14 @@ export const ComicGenerator = {
             raw: result
         });
 
-        if (result.status === 'succeeded') {
-            if (result.type === 'panel') {
+        if (result.status === 'succeeded' || result.status === 'processing') {
+            if (result.type === 'panel' || result.panel_id) {
+                // Store panel ID if available
+                if (result.panel_id && !this.originalPanelId) {
+                    this.originalPanelId = result.panel_id;
+                    console.log('Setting original panel ID:', this.originalPanelId);
+                }
+
                 // Check if we have panel output
                 if (result.output) {
                     console.log('Panel generation completed with output:', result.output);
@@ -397,13 +403,19 @@ export const ComicGenerator = {
                             this.cartoonificationState.set(predId, {
                                 status: 'pending',
                                 started_at: new Date().getTime(),
-                                original_prediction_id: predictionId
+                                original_prediction_id: this.originalPanelId || predictionId
                             });
                             setTimeout(() => this.checkResult(predId), 5000);
                         }
                     });
 
                     // Continue polling this panel
+                    setTimeout(() => this.checkResult(this.originalPanelId || predictionId), 5000);
+                    return;
+                }
+
+                // If status is processing, continue polling
+                if (result.status === 'processing') {
                     setTimeout(() => this.checkResult(predictionId), 5000);
                     return;
                 }
@@ -432,7 +444,8 @@ export const ComicGenerator = {
                 this.cartoonificationState.set(predictionId, {
                     status: 'completed',
                     output: result.output,
-                    completed_at: new Date().getTime()
+                    completed_at: new Date().getTime(),
+                    original_prediction_id: this.originalPanelId
                 });
 
                 // Continue polling the original prediction
