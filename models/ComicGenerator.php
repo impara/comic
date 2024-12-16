@@ -46,12 +46,22 @@ class ComicGenerator
                     throw new Exception("Character image is required");
                 }
 
+                // Log character details before processing
+                $this->logger->info("Processing character for panel", [
+                    'index' => $index,
+                    'character_id' => $character['id'] ?? 'unknown',
+                    'has_cartoonified' => isset($character['cartoonified_image']),
+                    'has_prediction_id' => isset($character['prediction_id']),
+                    'image_source' => isset($character['cartoonified_image']) ? 'cartoonified' : 'original'
+                ]);
+
                 // If character already has a cartoonified image, use it directly
                 if (isset($character['cartoonified_image'])) {
                     $processedCharacters[] = $character;
                     $characterImages[$index] = $character['cartoonified_image'];
                     $this->logger->info("Using existing cartoonified image", [
                         'character_index' => $index,
+                        'character_id' => $character['id'] ?? 'unknown',
                         'cartoonified_url' => $character['cartoonified_image']
                     ]);
                     continue;
@@ -66,6 +76,7 @@ class ComicGenerator
                     $pendingCartoonifications[] = $processedCharacter['prediction_id'];
                     $this->logger->info("Cartoonification pending", [
                         'character_index' => $index,
+                        'character_id' => $processedCharacter['id'] ?? 'unknown',
                         'prediction_id' => $processedCharacter['prediction_id']
                     ]);
                 } else {
@@ -73,10 +84,25 @@ class ComicGenerator
                     $characterImages[$index] = $processedCharacter['cartoonified_image'];
                     $this->logger->info("Using newly processed cartoonified image", [
                         'character_index' => $index,
+                        'character_id' => $processedCharacter['id'] ?? 'unknown',
                         'cartoonified_url' => $processedCharacter['cartoonified_image']
                     ]);
                 }
             }
+
+            // Log final character images array before panel composition
+            $this->logger->info("Final character images for panel composition", [
+                'character_count' => count($characterImages),
+                'images' => array_map(function ($url, $index) use ($characters) {
+                    return [
+                        'index' => $index,
+                        'character_id' => $characters[$index]['id'] ?? 'unknown',
+                        'image_url' => $url,
+                        'is_cartoonified' => isset($characters[$index]['cartoonified_image']),
+                        'original_image' => $characters[$index]['image'] ?? 'none'
+                    ];
+                }, $characterImages, array_keys($characterImages))
+            ]);
 
             // If there are pending cartoonifications, return early with status
             if (!empty($pendingCartoonifications)) {

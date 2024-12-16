@@ -31,6 +31,20 @@ class ImageComposer
             throw new Exception("No images provided for panel composition");
         }
 
+        // Log incoming images array
+        $this->logger->info("Starting panel composition", [
+            'image_count' => count($images),
+            'scene_context' => $sceneContext,
+            'images' => array_map(function ($url, $index) {
+                return [
+                    'index' => $index,
+                    'url' => $url,
+                    'is_replicate_url' => strpos($url, 'replicate.delivery') !== false,
+                    'is_base64' => strpos($url, 'data:image') === 0
+                ];
+            }, $images, array_keys($images))
+        ]);
+
         // Get art style from scene context or use default
         $artStyle = $sceneContext['style'] ?? 'default';
 
@@ -59,6 +73,9 @@ class ImageComposer
 
             // Process background first if it exists
             if (isset($images['background'])) {
+                $this->logger->info("Adding background image", [
+                    'image' => $images['background']
+                ]);
                 $this->addImageToPanel($panel, $images['background'], 0, 0, $panelWidth, $panelHeight);
                 unset($images['background']);
             }
@@ -66,19 +83,35 @@ class ImageComposer
             // Calculate positions for characters using force-directed algorithm
             $positions = $this->calculateCharacterPositions($images, $sceneContext, $panelWidth, $panelHeight);
 
+            // Log positions before adding images
+            $this->logger->info("Calculated character positions", [
+                'positions' => array_map(function ($pos, $index) use ($images) {
+                    return [
+                        'index' => $index,
+                        'position' => $pos,
+                        'image_url' => $images[$index]
+                    ];
+                }, $positions, array_keys($positions))
+            ]);
+
             // Add character images
             foreach ($images as $index => $imageData) {
                 if (!isset($positions[$index])) continue;
 
                 $pos = $positions[$index];
 
-                // Handle both string and array image data
-                $imageSource = is_array($imageData) ? $imageData['image'] : $imageData;
+                $this->logger->info("Adding character image to panel", [
+                    'index' => $index,
+                    'position' => $pos,
+                    'image_url' => $imageData,
+                    'is_replicate_url' => strpos($imageData, 'replicate.delivery') !== false,
+                    'is_base64' => strpos($imageData, 'data:image') === 0
+                ]);
 
                 // Add the character image
                 $this->addImageToPanel(
                     $panel,
-                    $imageSource,
+                    $imageData,
                     $pos['x'],
                     $pos['y'],
                     $pos['width'],
@@ -91,10 +124,20 @@ class ImageComposer
             imagepng($panel, $outputPath);
             imagedestroy($panel);
 
-            $this->logger->info("Panel composed successfully", ['path' => $outputPath]);
+            $this->logger->info("Panel composition completed", [
+                'output_path' => $outputPath,
+                'panel_dimensions' => [
+                    'width' => $panelWidth,
+                    'height' => $panelHeight
+                ]
+            ]);
+
             return $outputPath;
         } catch (Exception $e) {
-            $this->logger->error("Failed to compose panel", ['error' => $e->getMessage()]);
+            $this->logger->error("Failed to compose panel", [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
             throw $e;
         }
     }
@@ -112,6 +155,13 @@ class ImageComposer
     private function addImageToPanel(\GdImage $panel, string $imageData, int $x, int $y, int $width, int $height): void
     {
         try {
+            $this->logger->info("Adding image to panel", [
+                'position' => ['x' => $x, 'y' => $y],
+                'dimensions' => ['width' => $width, 'height' => $height],
+                'image_type' => strpos($imageData, 'data:image') === 0 ? 'base64' : (filter_var($imageData, FILTER_VALIDATE_URL) ? 'url' : 'file'),
+                'is_replicate_url' => strpos($imageData, 'replicate.delivery') !== false
+            ]);
+
             // Handle different image sources
             if (filter_var($imageData, FILTER_VALIDATE_URL)) {
                 // For remote URLs (like replicate.delivery)
