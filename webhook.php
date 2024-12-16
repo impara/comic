@@ -103,18 +103,21 @@ try {
                         throw new Exception("Invalid panel_data format");
                     }
 
-                    $logger->error("TEST_LOG - About to create ComicGenerator", [
-                        'panel_data' => [
-                            'character_count' => count($panelData['characters'] ?? []),
-                            'has_scene_description' => isset($panelData['scene_description'])
-                        ]
+                    // Update cartoonified_image for the character(s)
+                    // Assuming we have only one character or know the correct index:
+                    $panelData['characters'][0]['cartoonified_image'] = is_array($data['output']) ? $data['output'][0] : $data['output'];
+
+                    // Log that we're updating the character with the cartoonified image
+                    $logger->error("TEST_LOG - Setting cartoonified_image for character", [
+                        'character_id' => $panelData['characters'][0]['id'],
+                        'cartoonified_url' => $panelData['characters'][0]['cartoonified_image']
                     ]);
 
-                    // Create a new ComicGenerator instance
+                    // Now call generatePanel() with updated panelData
                     require_once __DIR__ . '/models/ComicGenerator.php';
                     $comicGenerator = new ComicGenerator($logger);
 
-                    $logger->error("TEST_LOG - About to call generatePanel", [
+                    $logger->error("TEST_LOG - About to call generatePanel after setting cartoonified_image", [
                         'character_count' => count($panelData['characters']),
                         'first_character' => isset($panelData['characters'][0]) ? [
                             'id' => $panelData['characters'][0]['id'] ?? 'unknown',
@@ -122,7 +125,6 @@ try {
                         ] : null
                     ]);
 
-                    // Generate the final panel, passing the original prediction ID
                     $panelResult = $comicGenerator->generatePanel(
                         $panelData['characters'],
                         $panelData['scene_description'],
