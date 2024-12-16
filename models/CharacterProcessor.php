@@ -99,19 +99,15 @@ class CharacterProcessor
             file_put_contents($pendingFile, json_encode([
                 'prediction_id' => $predictionId,
                 'original_image' => $character['image'],
+                'character_data' => $character,
                 'started_at' => time()
             ]));
 
             // Return immediately with the prediction ID
-            return [
-                'id' => $character['id'],
-                'name' => $character['name'],
-                'description' => $character['description'],
-                'image' => $character['image'],
+            return array_merge($character, [
                 'cartoonified_image' => null,
-                'prediction_id' => $predictionId,
-                'options' => $character['options'] ?? []
-            ];
+                'prediction_id' => $predictionId
+            ]);
         } catch (Exception $e) {
             $this->logger->error("Character processing failed", [
                 'error' => $e->getMessage(),

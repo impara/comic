@@ -111,18 +111,41 @@ try {
                         }
                     }
 
+                    // If character not found by prediction ID, try to match using original character data
+                    if ($characterIndex === -1 && isset($pending['character_data'])) {
+                        foreach ($panelData['characters'] as $index => $character) {
+                            if ($character['id'] === $pending['character_data']['id']) {
+                                $characterIndex = $index;
+                                break;
+                            }
+                        }
+                    }
+
                     if ($characterIndex === -1) {
                         $logger->error("Could not find character with prediction ID", [
                             'prediction_id' => $predictionId,
-                            'characters' => $panelData['characters']
+                            'characters' => $panelData['characters'],
+                            'pending_data' => $pending
                         ]);
                         throw new Exception("Character not found for prediction ID: $predictionId");
                     }
 
                     // Update the specific character with cartoonified image
                     $cartoonifiedUrl = is_array($data['output']) ? $data['output'][0] : $data['output'];
-                    $panelData['characters'][$characterIndex]['cartoonified_image'] = $cartoonifiedUrl;
-                    $panelData['characters'][$characterIndex]['image'] = $cartoonifiedUrl;
+                    $panelData['characters'][$characterIndex] = array_merge(
+                        $panelData['characters'][$characterIndex],
+                        [
+                            'cartoonified_image' => $cartoonifiedUrl,
+                            'image' => $cartoonifiedUrl,
+                            'prediction_id' => $predictionId
+                        ]
+                    );
+
+                    $logger->info("Updated character with cartoonified image", [
+                        'character_index' => $characterIndex,
+                        'character_id' => $panelData['characters'][$characterIndex]['id'],
+                        'cartoonified_url' => $cartoonifiedUrl
+                    ]);
 
                     // Create a new ComicGenerator instance
                     require_once __DIR__ . '/models/ComicGenerator.php';
