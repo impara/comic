@@ -77,8 +77,24 @@ try {
 
     // Check if this is a cartoonification completion
     $pendingFiles = glob($tempPath . "pending_*.json");
+    $logger->error("TEST_LOG - Searching pending files", [
+        'found_files' => count($pendingFiles),
+        'prediction_id' => $predictionId,
+        'pending_files' => array_map(function ($f) {
+            return basename($f);
+        }, $pendingFiles)
+    ]);
+
     foreach ($pendingFiles as $pendingFile) {
         $pending = json_decode(file_get_contents($pendingFile), true);
+        $logger->error("TEST_LOG - Checking pending file", [
+            'file' => basename($pendingFile),
+            'has_prediction_id' => isset($pending['prediction_id']),
+            'pending_prediction_id' => $pending['prediction_id'] ?? 'none',
+            'matches_current' => ($pending['prediction_id'] ?? '') === $predictionId,
+            'has_panel_data' => isset($pending['panel_data']),
+            'raw_pending' => $pending
+        ]);
         if ($pending && isset($pending['prediction_id']) && $pending['prediction_id'] === $predictionId) {
             $logger->error("TEST_LOG - Found matching cartoonification", [
                 'pending_file' => $pendingFile,

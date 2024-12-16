@@ -89,10 +89,11 @@ class ComicGenerator
                 if (isset($character['cartoonified_image'])) {
                     $processedCharacters[] = $character;
                     $characterImages[$index] = $character['cartoonified_image'];
-                    $this->logger->error("TEST_LOG - Using existing cartoonified image", [
+                    $this->logger->error("TEST_LOG - Using cartoonified image for character", [
+                        'character_id' => $character['id'] ?? 'unknown',
+                        'cartoonified_url' => $character['cartoonified_image'],
                         'index' => $index,
-                        'id' => $character['id'] ?? 'unknown',
-                        'cartoonified_url' => $character['cartoonified_image']
+                        'is_replicate_url' => strpos($character['cartoonified_image'], 'replicate.delivery') !== false
                     ]);
                     continue;
                 }
@@ -101,22 +102,35 @@ class ComicGenerator
                 $processedCharacter = $this->characterProcessor->processCharacter($character);
                 $processedCharacters[] = $processedCharacter;
 
-                // Log processed character result
-                $this->logger->error("TEST_LOG - Character processed", [
-                    'index' => $index,
-                    'id' => $processedCharacter['id'] ?? 'unknown',
-                    'has_prediction_id' => isset($processedCharacter['prediction_id']),
-                    'prediction_id' => $processedCharacter['prediction_id'] ?? null,
-                    'has_cartoonified' => isset($processedCharacter['cartoonified_image']),
-                    'cartoonified_url' => $processedCharacter['cartoonified_image'] ?? null
-                ]);
-
                 if (isset($processedCharacter['prediction_id'])) {
                     $pendingCartoonifications[] = $processedCharacter['prediction_id'];
+                    $this->logger->error("TEST_LOG - Character pending cartoonification", [
+                        'character_id' => $processedCharacter['id'] ?? 'unknown',
+                        'prediction_id' => $processedCharacter['prediction_id'],
+                        'index' => $index
+                    ]);
                 } else {
                     $characterImages[$index] = $processedCharacter['cartoonified_image'];
+                    $this->logger->error("TEST_LOG - Using processed image for character", [
+                        'character_id' => $processedCharacter['id'] ?? 'unknown',
+                        'image_url' => $processedCharacter['cartoonified_image'],
+                        'index' => $index,
+                        'is_replicate_url' => strpos($processedCharacter['cartoonified_image'], 'replicate.delivery') !== false
+                    ]);
                 }
             }
+
+            // Log final character images before composition
+            $this->logger->error("TEST_LOG - Final character images before composition", [
+                'character_count' => count($characterImages),
+                'images' => array_map(function ($url, $index) {
+                    return [
+                        'index' => $index,
+                        'url' => $url,
+                        'is_replicate_url' => strpos($url, 'replicate.delivery') !== false
+                    ];
+                }, $characterImages, array_keys($characterImages))
+            ]);
 
             // Log arrays before composition
             $this->logger->error("TEST_LOG - Arrays before composition", [

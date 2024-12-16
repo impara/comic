@@ -96,16 +96,29 @@ class CharacterProcessor
             // Create a pending file to track this cartoonification
             $tempPath = $this->config->getTempPath();
             $pendingFile = $tempPath . "pending_{$predictionId}.json";
-            file_put_contents($pendingFile, json_encode([
+
+            $panelData = [
+                'characters' => [$character],
+                'scene_description' => $character['scene_description'] ?? ''
+            ];
+
+            $pendingData = [
                 'prediction_id' => $predictionId,
                 'original_image' => $character['image'],
                 'character_data' => $character,
-                'panel_data' => json_encode([
-                    'characters' => [$character],
-                    'scene_description' => $character['scene_description'] ?? ''
-                ]),
+                'panel_data' => json_encode($panelData),
                 'started_at' => time()
-            ]));
+            ];
+
+            $this->logger->error("TEST_LOG - Creating pending file", [
+                'file' => basename($pendingFile),
+                'prediction_id' => $predictionId,
+                'has_scene_description' => isset($character['scene_description']),
+                'panel_data' => $panelData,
+                'pending_data' => $pendingData
+            ]);
+
+            file_put_contents($pendingFile, json_encode($pendingData));
 
             // Return immediately with the prediction ID
             return array_merge($character, [

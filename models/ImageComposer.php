@@ -27,47 +27,24 @@ class ImageComposer
      */
     public function composePanel(array $images, array $sceneContext = [], array $userPositions = []): string
     {
-        // Test log to confirm code execution
-        $this->logger->error("TEST_LOG - composePanel method started", [
-            'time' => date('Y-m-d H:i:s'),
-            'image_count' => count($images)
-        ]);
-
-        if (empty($images)) {
-            throw new Exception("No images provided for panel composition");
-        }
-
-        // Unconditional logging of all input images
-        $this->logger->error("TEST_LOG - Input images", [
-            'total_images' => count($images),
-            'scene_context' => $sceneContext,
-            'raw_images' => array_map(function ($url, $index) {
+        $this->logger->error("TEST_LOG - composePanel received images", [
+            'image_count' => count($images),
+            'images' => array_map(function ($url, $index) {
                 return [
                     'index' => $index,
                     'url' => $url,
-                    'type' => $this->determineImageType($url),
-                    'is_replicate_url' => strpos($url, 'replicate.delivery') !== false,
-                    'url_length' => strlen($url)
+                    'is_replicate_url' => strpos($url, 'replicate.delivery') !== false
                 ];
             }, $images, array_keys($images))
         ]);
 
         try {
-            // Create output directory if it doesn't exist
-            if (!file_exists($this->outputDir)) {
-                mkdir($this->outputDir, 0755, true);
-            }
+            // Create a new image with transparent background
+            $width = 1024;  // Standard width for the panel
+            $height = 1024; // Standard height for the panel
+            $panel = imagecreatetruecolor($width, $height);
 
-            // Initialize GD image for the panel
-            $panelWidth = 1024;  // Default panel width
-            $panelHeight = 1024; // Default panel height
-            $panel = imagecreatetruecolor($panelWidth, $panelHeight);
-
-            if (!$panel) {
-                throw new Exception("Failed to create panel image");
-            }
-
-            // Enable alpha blending
+            // Enable alpha blending and save alpha channel
             imagealphablending($panel, true);
             imagesavealpha($panel, true);
 
@@ -75,94 +52,88 @@ class ImageComposer
             $transparent = imagecolorallocatealpha($panel, 0, 0, 0, 127);
             imagefill($panel, 0, 0, $transparent);
 
-            // Process background first if it exists
-            if (isset($images['background'])) {
-                $this->logger->error("TEST_LOG - Processing background image", [
-                    'image_url' => $images['background'],
-                    'type' => $this->determineImageType($images['background'])
-                ]);
-                $this->addImageToPanel($panel, $images['background'], 0, 0, $panelWidth, $panelHeight);
-                unset($images['background']);
-            }
+            // Calculate positions for each character
+            $positions = $this->calculateCharacterPositions($images, $sceneContext, $width, $height);
 
-            // Calculate positions for characters
-            $positions = $this->calculateCharacterPositions($images, $sceneContext, $panelWidth, $panelHeight);
-
-            // Log all positions and images
-            $this->logger->error("TEST_LOG - Positions calculated", [
-                'total_positions' => count($positions),
-                'positions_and_images' => array_map(function ($pos, $index) use ($images) {
-                    return [
-                        'index' => $index,
-                        'position' => $pos,
-                        'image_url' => $images[$index] ?? null,
-                        'image_type' => isset($images[$index]) ? $this->determineImageType($images[$index]) : null
-                    ];
-                }, $positions, array_keys($positions))
-            ]);
-
-            // Add character images
+            // Add each character to the panel
             foreach ($images as $index => $imageUrl) {
-                // Log every image being processed
-                $this->logger->error("TEST_LOG - Processing character image", [
+                $this->logger->error("TEST_LOG - Adding image to panel", [
                     'index' => $index,
                     'image_url' => $imageUrl,
-                    'has_position' => isset($positions[$index]),
-                    'type' => $this->determineImageType($imageUrl)
+                    'position' => $positions[$index] ?? 'unknown',
+                    'is_replicate_url' => strpos($imageUrl, 'replicate.delivery') !== false
                 ]);
 
-                if (!isset($positions[$index])) {
-                    $this->logger->error("TEST_LOG - No position for image", [
-                        'index' => $index,
-                        'image_url' => $imageUrl
+                // Download and process the image
+                $characterImage = $this->loadImageFromUrl($imageUrl);
+                if (!$characterImage) {
+                    $this->logger->error("Failed to load character image", [
+                        'url' => $imageUrl,
+                        'index' => $index
                     ]);
                     continue;
                 }
 
-                $pos = $positions[$index];
+                // Get image dimensions
+                $srcWidth = imagesx($characterImage);
+                $srcHeight = imagesy($characterImage);
 
-                // Log before adding to panel
-                $this->logger->error("TEST_LOG - Adding image to panel", [
+                // Calculate target dimensions (e.g., 1/3 of panel width)
+                $targetWidth = $width / 3;
+                $targetHeight = $height / 3;
+
+                // Calculate scaling factor to maintain aspect ratio
+                $scale = min($targetWidth / $srcWidth, $targetHeight / $srcHeight);
+                $newWidth = $srcWidth * $scale;
+                $newHeight = $srcHeight * $scale;
+
+                // Get position from calculated positions array
+                $position = $positions[$index] ?? ['x' => 0, 'y' => 0];
+                $x = $position['x'] - ($newWidth / 2);  // Center horizontally
+                $y = $position['y'] - ($newHeight / 2); // Center vertically
+
+                $this->logger->error("TEST_LOG - Image dimensions for panel", [
                     'index' => $index,
-                    'image_url' => $imageUrl,
-                    'position' => $pos,
-                    'type' => $this->determineImageType($imageUrl)
+                    'original_width' => $srcWidth,
+                    'original_height' => $srcHeight,
+                    'new_width' => $newWidth,
+                    'new_height' => $newHeight,
+                    'position_x' => $x,
+                    'position_y' => $y
                 ]);
 
-                // Add the character image
-                $this->addImageToPanel(
+                // Copy and resize the character onto the panel
+                imagecopyresampled(
                     $panel,
-                    $imageUrl,
-                    $pos['x'],
-                    $pos['y'],
-                    $pos['width'],
-                    $pos['height']
+                    $characterImage,
+                    $x,
+                    $y,
+                    0,
+                    0,
+                    $newWidth,
+                    $newHeight,
+                    $srcWidth,
+                    $srcHeight
                 );
 
-                // Log success
-                $this->logger->error("TEST_LOG - Image added successfully", [
-                    'index' => $index,
-                    'image_url' => $imageUrl
-                ]);
+                // Clean up
+                imagedestroy($characterImage);
             }
 
             // Save the composed panel
-            $outputPath = $this->outputDir . '/panel_' . uniqid() . '.png';
-            $saveResult = imagepng($panel, $outputPath);
+            $outputPath = $this->config->getTempPath() . 'composed_panel_' . uniqid() . '.png';
+            imagepng($panel, $outputPath);
+            imagedestroy($panel);
 
-            // Log final result
-            $this->logger->error("TEST_LOG - Panel saved", [
+            $this->logger->error("TEST_LOG - Panel composition completed", [
                 'output_path' => $outputPath,
-                'save_success' => $saveResult,
                 'file_exists' => file_exists($outputPath),
-                'file_size' => file_exists($outputPath) ? filesize($outputPath) : 0,
-                'total_images_processed' => count($images)
+                'file_size' => file_exists($outputPath) ? filesize($outputPath) : 0
             ]);
 
-            imagedestroy($panel);
             return $outputPath;
         } catch (Exception $e) {
-            $this->logger->error("Failed to compose panel", [
+            $this->logger->error("Panel composition failed", [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString()
             ]);
@@ -342,5 +313,54 @@ class ImageComposer
         }
 
         return $positions;
+    }
+
+    /**
+     * Load an image from a URL and return a GD image resource
+     * @param string $url URL of the image to load
+     * @return \GdImage|false GD image resource or false on failure
+     */
+    private function loadImageFromUrl(string $url): \GdImage|false
+    {
+        try {
+            $this->logger->error("TEST_LOG - Loading image from URL", [
+                'url' => $url,
+                'is_replicate_url' => strpos($url, 'replicate.delivery') !== false
+            ]);
+
+            // Download image content
+            $imageContent = @file_get_contents($url);
+            if ($imageContent === false) {
+                $this->logger->error("Failed to download image", [
+                    'url' => $url,
+                    'error' => error_get_last()['message'] ?? 'Unknown error'
+                ]);
+                return false;
+            }
+
+            // Create image from content
+            $image = @imagecreatefromstring($imageContent);
+            if (!$image) {
+                $this->logger->error("Failed to create image from content", [
+                    'url' => $url,
+                    'content_length' => strlen($imageContent)
+                ]);
+                return false;
+            }
+
+            $this->logger->error("TEST_LOG - Successfully loaded image", [
+                'url' => $url,
+                'width' => imagesx($image),
+                'height' => imagesy($image)
+            ]);
+
+            return $image;
+        } catch (Exception $e) {
+            $this->logger->error("Image loading failed", [
+                'url' => $url,
+                'error' => $e->getMessage()
+            ]);
+            return false;
+        }
     }
 }
