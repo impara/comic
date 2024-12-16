@@ -30,6 +30,17 @@ class ComicGenerator
      */
     public function generatePanel(array $characters, string $sceneDescription, ?string $originalPredictionId = null): array
     {
+        // Validate that all characters have cartoonified images
+        foreach ($characters as $character) {
+            if (!isset($character['cartoonified_image'])) {
+                $this->logger->error("Missing cartoonified image for character", [
+                    'character_id' => $character['id'] ?? 'unknown',
+                    'has_original' => isset($character['image'])
+                ]);
+                throw new Exception("Cannot generate panel: Missing cartoonified image for character " . ($character['id'] ?? 'unknown'));
+            }
+        }
+
         // Test log to confirm code execution
         $this->logger->error("TEST_LOG - generatePanel method started", [
             'time' => date('Y-m-d H:i:s'),

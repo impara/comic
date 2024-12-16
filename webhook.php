@@ -82,7 +82,10 @@ try {
         'prediction_id' => $predictionId,
         'pending_files' => array_map(function ($f) {
             return basename($f);
-        }, $pendingFiles)
+        }, $pendingFiles),
+        'webhook_status' => $data['status'],
+        'has_output' => !empty($data['output']),
+        'output_type' => !empty($data['output']) ? (is_array($data['output']) ? 'array' : 'string') : 'none'
     ]);
 
     foreach ($pendingFiles as $pendingFile) {
