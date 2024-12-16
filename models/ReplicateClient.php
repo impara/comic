@@ -203,14 +203,16 @@ class ReplicateClient
                 'height' => 1024,
                 'cfg_scale' => 7.5,
                 'init_image' => $params['composed_panel'] ?? null,
-                'prompt_strength' => isset($params['composed_panel']) ? 0.7 : 1.0
+                'prompt_strength' => isset($params['composed_panel']) ? 0.7 : 1.0,
+                'cartoonified_images' => $params['cartoonified_images'] ?? []  // Add cartoonified images
             ];
 
-            // Log the final prompt
-            $this->logger->info("Generated enhanced prompt", [
+            // Log the final parameters
+            $this->logger->info("Final model parameters", [
                 'prompt' => $enhancedPrompt,
                 'style' => $style,
-                'has_composition' => isset($params['composed_panel'])
+                'has_composition' => isset($params['composed_panel']),
+                'cartoonified_images_count' => count($params['cartoonified_images'] ?? [])
             ]);
 
             // Make the API call

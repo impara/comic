@@ -33,12 +33,27 @@ class ImageComposer
                 return [
                     'index' => $index,
                     'url' => $url,
-                    'is_replicate_url' => strpos($url, 'replicate.delivery') !== false
+                    'is_replicate_url' => strpos($url, 'replicate.delivery') !== false,
+                    'is_valid_url' => filter_var($url, FILTER_VALIDATE_URL) !== false
                 ];
             }, $images, array_keys($images))
         ]);
 
         try {
+            // Validate all images are valid URLs
+            $validImages = array_filter($images, function ($url) {
+                return filter_var($url, FILTER_VALIDATE_URL) !== false;
+            });
+
+            if (count($validImages) !== count($images)) {
+                $this->logger->error("Invalid image URLs found", [
+                    'valid_count' => count($validImages),
+                    'total_count' => count($images),
+                    'invalid_urls' => array_diff($images, $validImages)
+                ]);
+                throw new Exception("Some images have invalid URLs");
+            }
+
             // Create a new image with transparent background
             $width = 1024;  // Standard width for the panel
             $height = 1024; // Standard height for the panel
@@ -53,10 +68,10 @@ class ImageComposer
             imagefill($panel, 0, 0, $transparent);
 
             // Calculate positions for each character
-            $positions = $this->calculateCharacterPositions($images, $sceneContext, $width, $height);
+            $positions = $this->calculateCharacterPositions($validImages, $sceneContext, $width, $height);
 
             // Add each character to the panel
-            foreach ($images as $index => $imageUrl) {
+            foreach ($validImages as $index => $imageUrl) {
                 $this->logger->error("TEST_LOG - Adding image to panel", [
                     'index' => $index,
                     'image_url' => $imageUrl,
@@ -128,7 +143,8 @@ class ImageComposer
             $this->logger->error("TEST_LOG - Panel composition completed", [
                 'output_path' => $outputPath,
                 'file_exists' => file_exists($outputPath),
-                'file_size' => file_exists($outputPath) ? filesize($outputPath) : 0
+                'file_size' => file_exists($outputPath) ? filesize($outputPath) : 0,
+                'images_used' => $validImages
             ]);
 
             return $outputPath;

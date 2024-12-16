@@ -196,34 +196,6 @@ class ComicGenerator
             'style' => $characters[0]['options']['style'] ?? 'modern'
         ];
 
-        // Rest of the panel generation code...
-
-        // Unconditional logging of initial character state
-        $this->logger->error("TEST_LOG - Raw character data", [
-            'characters' => array_map(function ($char) {
-                return [
-                    'id' => $char['id'] ?? 'unknown',
-                    'has_image' => isset($char['image']),
-                    'has_cartoonified' => isset($char['cartoonified_image']),
-                    'image_url' => $char['image'] ?? null,
-                    'cartoonified_url' => $char['cartoonified_image'] ?? null,
-                    'all_keys' => array_keys($char)
-                ];
-            }, $characters)
-        ]);
-
-        // Log final character images before composition
-        $this->logger->error("TEST_LOG - Final character images before composition", [
-            'character_count' => count($characterImages),
-            'images' => array_map(function ($url, $index) {
-                return [
-                    'index' => $index,
-                    'url' => $url,
-                    'is_replicate_url' => strpos($url, 'replicate.delivery') !== false
-                ];
-            }, $characterImages, array_keys($characterImages))
-        ]);
-
         // Log arrays before composition
         $this->logger->error("TEST_LOG - Arrays before composition", [
             'processed_characters' => array_map(function ($char) {
@@ -237,70 +209,38 @@ class ComicGenerator
             'pending_cartoonifications' => $pendingCartoonifications
         ]);
 
-        // Log the final arrays before composition
-        $this->logger->info("DEBUG_VERIFY - Final arrays before composition", [
-            'processed_characters' => array_map(function ($char) {
-                return [
-                    'id' => $char['id'] ?? 'unknown',
-                    'has_cartoonified' => isset($char['cartoonified_image']),
-                    'cartoonified_url' => $char['cartoonified_image'] ?? null
-                ];
-            }, $processedCharacters),
-            'character_images' => array_map(function ($url, $index) {
-                return [
-                    'index' => $index,
-                    'url' => $url,
-                    'is_replicate_url' => strpos($url, 'replicate.delivery') !== false
-                ];
-            }, $characterImages, array_keys($characterImages)),
-            'pending_cartoonifications' => $pendingCartoonifications
-        ]);
+        // Verify all cartoonified images are valid URLs
+        $validCartoonifiedImages = array_filter($characterImages, function ($url) {
+            return filter_var($url, FILTER_VALIDATE_URL) !== false;
+        });
 
-        // Always log the full state of characters and images before composition
-        $this->logger->info("VERIFICATION - Full character state before composition", [
-            'characters' => array_map(function ($char) {
-                return [
-                    'id' => $char['id'] ?? 'unknown',
-                    'name' => $char['name'] ?? 'unknown',
-                    'has_image' => isset($char['image']),
-                    'image_url' => $char['image'] ?? null,
-                    'has_cartoonified' => isset($char['cartoonified_image']),
-                    'cartoonified_url' => $char['cartoonified_image'] ?? null,
-                    'has_prediction_id' => isset($char['prediction_id']),
-                    'prediction_id' => $char['prediction_id'] ?? null
-                ];
-            }, $characters)
-        ]);
-
-        // Log the exact state of characterImages array
-        $this->logger->info("VERIFICATION - Character images being sent to panel composition", [
-            'character_count' => count($characterImages),
-            'character_images' => array_map(function ($url, $index) {
-                return [
-                    'index' => $index,
-                    'url' => $url,
-                    'is_replicate_url' => strpos($url, 'replicate.delivery') !== false
-                ];
-            }, $characterImages, array_keys($characterImages))
-        ]);
+        if (count($validCartoonifiedImages) !== count($characterImages)) {
+            $this->logger->error("Invalid cartoonified image URLs found", [
+                'valid_count' => count($validCartoonifiedImages),
+                'total_count' => count($characterImages),
+                'invalid_urls' => array_diff($characterImages, $validCartoonifiedImages)
+            ]);
+            throw new Exception("Some cartoonified images have invalid URLs");
+        }
 
         // Compose the panel using ImageComposer
         $imageComposer = new ImageComposer($this->logger);
 
         // Log right before calling composePanel
         $this->logger->info("VERIFICATION - Calling composePanel", [
-            'character_images_count' => count($characterImages),
+            'character_images_count' => count($validCartoonifiedImages),
             'scene_context' => $sceneContext,
-            'first_image_url' => reset($characterImages) ?: 'none'
+            'first_image_url' => reset($validCartoonifiedImages) ?: 'none'
         ]);
 
-        $composedPanelPath = $imageComposer->composePanel($characterImages, $sceneContext);
+        $composedPanelPath = $imageComposer->composePanel($validCartoonifiedImages, $sceneContext);
 
         // Log after panel composition
         $this->logger->info("VERIFICATION - Panel composition completed", [
             'composed_panel_path' => $composedPanelPath,
             'exists' => file_exists($composedPanelPath),
-            'size' => file_exists($composedPanelPath) ? filesize($composedPanelPath) : 0
+            'size' => file_exists($composedPanelPath) ? filesize($composedPanelPath) : 0,
+            'cartoonified_images_used' => $validCartoonifiedImages
         ]);
 
         // Generate the final panel with background and composition
@@ -311,7 +251,7 @@ class ComicGenerator
             'options' => [
                 'style' => $sceneContext['style']
             ],
-            'cartoonified_images' => $characterImages
+            'cartoonified_images' => $validCartoonifiedImages
         ]);
 
         // If we have an original prediction ID, store the final result
@@ -324,7 +264,7 @@ class ComicGenerator
             file_put_contents($mappingFile, json_encode([
                 'original_prediction_id' => $originalPredictionId,
                 'panel_prediction_id' => $result['id'],
-                'cartoonified_images' => $characterImages,
+                'cartoonified_images' => $validCartoonifiedImages,
                 'created_at' => date('c')
             ]));
 
@@ -332,14 +272,14 @@ class ComicGenerator
                 'original_id' => $originalPredictionId,
                 'panel_id' => $result['id'],
                 'mapping_file' => $mappingFile,
-                'cartoonified_images' => $characterImages
+                'cartoonified_images' => $validCartoonifiedImages
             ]);
         }
 
         $this->logger->info("Panel generation completed", [
             'result' => $result,
             'original_prediction_id' => $originalPredictionId,
-            'cartoonified_images' => $characterImages
+            'cartoonified_images' => $validCartoonifiedImages
         ]);
 
         return $result;

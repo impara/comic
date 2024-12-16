@@ -238,11 +238,18 @@ export const ComicGenerator = {
                         if (result.pending_predictions && result.pending_predictions.length > 0) {
                             console.log('Panel has pending cartoonifications:', result.pending_predictions);
 
+                            // Update progress bar based on completed cartoonifications
+                            const totalCartoonifications = result.pending_predictions.length;
+                            const completedCartoonifications = Array.from(this.cartoonificationState.values())
+                                .filter(state => state.status === 'completed').length;
+                            const progress = 25 + ((completedCartoonifications / totalCartoonifications) * 25);
+                            $('.progress-bar').css('width', `${progress}%`);
+
                             // Update UI to show cartoonification progress
                             $('#debugInfo').html(`
                                 <p>Cartoonifying characters...</p>
-                                <p>Pending: ${result.pending_predictions.length}</p>
-                                <p>IDs: ${result.pending_predictions.join(', ')}</p>
+                                <p>Progress: ${completedCartoonifications} of ${totalCartoonifications} completed</p>
+                                <p>Pending IDs: ${result.pending_predictions.join(', ')}</p>
                             `);
 
                             // Start tracking each pending cartoonification
@@ -260,18 +267,39 @@ export const ComicGenerator = {
 
                         // Check if this is a final panel with cartoonification info
                         if (result.debug_info?.used_cartoonified_images) {
-                            console.log('Panel completed with cartoonified images:', result.debug_info.used_cartoonified_images);
+                            console.log('Panel completed with cartoonified images:', result.debug_info);
 
                             // Log cartoonification state for debugging
                             console.log('Final cartoonification state:', {
                                 tracked_items: Array.from(this.cartoonificationState.entries()),
-                                panel_cartoonified_images: result.debug_info.used_cartoonified_images
+                                panel_cartoonified_images: result.debug_info.used_cartoonified_images,
+                                cartoonification_status: result.debug_info.cartoonification_status
                             });
+
+                            // Update progress bar to 100%
+                            $('.progress-bar').css('width', '100%');
+
+                            // Update UI with cartoonification status
+                            $('#debugInfo').html(`
+                                <p>Panel generation completed!</p>
+                                <p>Cartoonification status:</p>
+                                <ul>
+                                    <li>Total images: ${result.debug_info.cartoonification_status.total_images}</li>
+                                    <li>Valid images: ${result.debug_info.cartoonification_status.valid_images}</li>
+                                    <li>Completed at: ${result.debug_info.cartoonification_status.timestamp}</li>
+                                </ul>
+                            `);
 
                             this.displayGeneratedComic(result);
                         } else {
                             console.error('Panel completed but may be missing cartoonification:', result);
-                            // Still display but log the warning
+                            // Still display but log the warning and show warning in UI
+                            $('#debugInfo').html(`
+                                <div class="alert alert-warning">
+                                    <p><strong>Warning:</strong> Panel completed but cartoonification status is unclear.</p>
+                                    <p>The panel will still be displayed, but characters may not be properly cartoonified.</p>
+                                </div>
+                            `);
                             this.displayGeneratedComic(result);
                         }
                     } else if (result.type === 'cartoonification') {
@@ -281,8 +309,13 @@ export const ComicGenerator = {
                         const completedCount = Array.from(this.cartoonificationState.values())
                             .filter(state => state.status === 'completed').length + 1;
 
+                        // Update progress bar for cartoonification phase (25-50%)
+                        const totalCartoonifications = this.cartoonificationState.size;
+                        const progress = 25 + ((completedCount / totalCartoonifications) * 25);
+                        $('.progress-bar').css('width', `${progress}%`);
+
                         $('#debugInfo').html(`
-                            <p>Character cartoonification completed: ${completedCount}</p>
+                            <p>Character cartoonification completed: ${completedCount} of ${totalCartoonifications}</p>
                             <p>Processing final panel...</p>
                         `);
 
@@ -305,6 +338,13 @@ export const ComicGenerator = {
                     // Update UI with more detailed status
                     const processingType = result.type || 'unknown';
                     const pendingCount = result.pending_predictions?.length || 0;
+
+                    // Update progress bar based on type
+                    if (processingType === 'cartoonification') {
+                        $('.progress-bar').css('width', '35%');
+                    } else if (processingType === 'panel') {
+                        $('.progress-bar').css('width', '75%');
+                    }
 
                     $('#debugInfo').html(`
                         <p>Processing ${processingType}...</p>
@@ -339,9 +379,6 @@ export const ComicGenerator = {
     displayGeneratedComic(result) {
         console.log('Displaying generated comic:', result);
 
-        // Update progress bar to 100%
-        $('.progress-bar').css('width', '100%');
-
         UIManager.hideGeneratingState(() => {
             if (result && (result.output || result.panels)) {
                 // Handle both single panel and multi-panel results
@@ -351,14 +388,16 @@ export const ComicGenerator = {
                 // Create a container for the panels
                 let panelHtml = '<div class="comic-strip-container">';
 
-                // Add each panel
+                // Add each panel with loading state
                 panels.forEach((panelUrl, index) => {
                     if (panelUrl) {
                         panelHtml += `
                             <div class="comic-panel">
+                                <div class="panel-loading">Loading panel ${index + 1}...</div>
                                 <img src="${panelUrl}" class="img-fluid mb-4" 
                                      alt="Comic Panel ${index + 1}" 
-                                     onerror="this.onerror=null; this.src='assets/images/error.png'; console.error('Failed to load comic panel ${index + 1}');">
+                                     onload="this.parentElement.querySelector('.panel-loading').style.display='none';"
+                                     onerror="this.onerror=null; this.src='assets/images/error.png'; this.parentElement.querySelector('.panel-loading').innerHTML='Failed to load panel';">
                             </div>
                         `;
                     }
@@ -387,12 +426,22 @@ export const ComicGenerator = {
                             padding: 10px;
                             border: 2px solid #000;
                             border-radius: 5px;
+                            min-height: 200px;
                         }
                         .comic-panel img {
                             width: 100%;
                             height: auto;
                             object-fit: cover;
                             border-radius: 3px;
+                        }
+                        .panel-loading {
+                            position: absolute;
+                            top: 50%;
+                            left: 50%;
+                            transform: translate(-50%, -50%);
+                            text-align: center;
+                            color: #666;
+                            font-style: italic;
                         }
                     </style>
                 `;
@@ -408,11 +457,23 @@ export const ComicGenerator = {
                 // Show completion status
                 UIManager.showCompletionState();
 
-                // Update debug info
+                // Update debug info with cartoonification status if available
+                const debugInfo = result.debug_info ? `
+                    <div class="mt-3">
+                        <h6>Generation Details:</h6>
+                        <ul class="list-unstyled">
+                            <li>Total Images: ${result.debug_info.cartoonification_status?.total_images || 'N/A'}</li>
+                            <li>Valid Images: ${result.debug_info.cartoonification_status?.valid_images || 'N/A'}</li>
+                            <li>Completed: ${result.debug_info.cartoonification_status?.timestamp || 'N/A'}</li>
+                        </ul>
+                    </div>
+                ` : '';
+
                 $('#debugInfo').html(`
                     <p>Comic generation completed successfully!</p>
                     <p>Number of panels: ${panels.length}</p>
                     ${panels.map((url, i) => `<p>Panel ${i + 1} URL: ${url}</p>`).join('')}
+                    ${debugInfo}
                 `);
             } else {
                 console.error('No output URL in result:', result);

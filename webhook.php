@@ -190,6 +190,7 @@ try {
                         'scene_description' => $panelData['scene_description']
                     ]);
 
+                    // Update character's cartoonified image
                     $panelData['characters'][0]['cartoonified_image'] = $cartoonifiedUrl;
 
                     // Store cartoonification mapping for verification
@@ -202,6 +203,23 @@ try {
                         'created_at' => date('c')
                     ]));
 
+                    // Update state file with cartoonified image
+                    if (isset($pending['state_file'])) {
+                        $stateFile = $tempPath . $pending['state_file'];
+                        if (file_exists($stateFile)) {
+                            $state = json_decode(file_get_contents($stateFile), true) ?? [];
+                            foreach ($state['cartoonification_requests'] ?? [] as &$request) {
+                                if ($request['prediction_id'] === $predictionId) {
+                                    $request['status'] = 'succeeded';
+                                    $request['completed_at'] = time();
+                                    $request['cartoonified_url'] = $cartoonifiedUrl;
+                                    break;
+                                }
+                            }
+                            file_put_contents($stateFile, json_encode($state));
+                        }
+                    }
+
                     // Log the updated panel data before generating panel
                     $logger->error("TEST_LOG - Updated panel data with cartoonified image", [
                         'character_id' => $panelData['characters'][0]['id'],
@@ -209,7 +227,8 @@ try {
                         'scene_description' => $panelData['scene_description'],
                         'full_panel_data' => $panelData,
                         'original_pending_file' => basename($pendingFile),
-                        'cartoonification_mapping' => basename($cartoonificationMappingFile)
+                        'cartoonification_mapping' => basename($cartoonificationMappingFile),
+                        'state_file' => $pending['state_file'] ?? null
                     ]);
 
                     // Now call generatePanel() with updated panelData
@@ -296,8 +315,20 @@ try {
                     'panel_id' => $predictionId,
                     'cartoonified_images' => $cartoonifiedImages,
                     'has_output' => !empty($data['output']),
-                    'output_type' => is_array($data['output']) ? 'array' : 'string'
+                    'output_type' => is_array($data['output']) ? 'array' : 'string',
+                    'mapping_data' => $mapping
                 ]);
+
+                // Verify cartoonified images are valid URLs
+                $validCartoonifiedImages = array_filter($cartoonifiedImages, function ($url) {
+                    return filter_var($url, FILTER_VALIDATE_URL) !== false;
+                });
+
+                if (empty($validCartoonifiedImages) && !empty($cartoonifiedImages)) {
+                    $logger->error("Invalid cartoonified image URLs found", [
+                        'invalid_urls' => array_diff($cartoonifiedImages, $validCartoonifiedImages)
+                    ]);
+                }
 
                 file_put_contents($originalResultFile, json_encode([
                     'id' => $mapping['original_prediction_id'],
@@ -306,9 +337,14 @@ try {
                     'type' => 'panel',
                     'completed_at' => date('c'),
                     'debug_info' => [
-                        'used_cartoonified_images' => $cartoonifiedImages,
+                        'used_cartoonified_images' => $validCartoonifiedImages,
                         'panel_id' => $predictionId,
-                        'original_id' => $mapping['original_prediction_id']
+                        'original_id' => $mapping['original_prediction_id'],
+                        'cartoonification_status' => [
+                            'total_images' => count($cartoonifiedImages),
+                            'valid_images' => count($validCartoonifiedImages),
+                            'timestamp' => date('c')
+                        ]
                     ]
                 ]));
 
@@ -316,7 +352,7 @@ try {
                     'original_file' => $originalResultFile,
                     'panel_output' => $data['output'],
                     'debug_info' => [
-                        'used_cartoonified_images' => $cartoonifiedImages
+                        'used_cartoonified_images' => $validCartoonifiedImages
                     ]
                 ]);
 
