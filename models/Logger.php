@@ -17,6 +17,9 @@ class Logger implements LoggerInterface
     {
         $config = Config::getInstance();
 
+        // Test log to verify logger is working
+        error_log("TEST_LOG - Logger initialized at " . date('Y-m-d H:i:s'));
+
         // Determine if we're in production
         $isProduction = isset($_SERVER['SERVER_NAME']) && strpos($_SERVER['SERVER_NAME'], 'comic.amertech.online') !== false;
 
@@ -32,6 +35,15 @@ class Logger implements LoggerInterface
         $this->maxFiles = 3;
 
         $this->ensureLogDirectory();
+
+        // Write initial test message to verify file is writable
+        $this->error('TEST_LOG - Logger initialized', [
+            'log_file' => $this->logFile,
+            'log_dir' => $this->logDir,
+            'debug_mode' => $config->isDebugMode(),
+            'log_level' => $config->getEnv('LOG_LEVEL', 'unknown'),
+            'time' => date('Y-m-d H:i:s')
+        ]);
     }
 
     private function ensureLogDirectory(): void
@@ -126,10 +138,10 @@ class Logger implements LoggerInterface
         return $filtered;
     }
 
-    private function shouldLog(string $level): bool
+    private function shouldLog(string $level, string $message): bool
     {
-        // During testing/debugging, we want to see all logs
-        if (strpos($level, 'TEST_LOG') !== false || strpos($level, 'DEBUG_VERIFY') !== false) {
+        // Always log test messages
+        if (str_starts_with($message, 'TEST_LOG') || str_starts_with($message, 'DEBUG_VERIFY')) {
             return true;
         }
 
@@ -138,7 +150,9 @@ class Logger implements LoggerInterface
             return true;
         }
 
-        $configLevel = Config::getInstance()->getLogLevel();
+        // Get configured log level
+        $configLevel = strtoupper(Config::getInstance()->getEnv('LOG_LEVEL', 'INFO'));
+
         $logLevels = [
             'DEBUG' => 0,
             'INFO' => 1,
@@ -146,7 +160,12 @@ class Logger implements LoggerInterface
             'ERROR' => 3
         ];
 
-        // If level isn't recognized, allow it through (better to log than not)
+        // If we're in debug mode or log level is debug, log everything
+        if (Config::getInstance()->isDebugMode() || $configLevel === 'DEBUG') {
+            return true;
+        }
+
+        // If level isn't recognized, allow it through
         if (!isset($logLevels[$level])) {
             return true;
         }
@@ -154,43 +173,65 @@ class Logger implements LoggerInterface
         return isset($logLevels[$configLevel]) && $logLevels[$level] >= $logLevels[$configLevel];
     }
 
-    private function writeLog(string $level, string $message, array $context): void
-    {
-        $this->rotateLogIfNeeded();
-
-        // Filter sensitive data from context
-        $filteredContext = $this->filterLogContext($context);
-
-        $timestamp = date('Y-m-d H:i:s');
-        $pid = getmypid();
-        $contextJson = !empty($filteredContext) ? json_encode($filteredContext, JSON_UNESCAPED_SLASHES) : '';
-
-        $logMessage = sprintf(
-            "[%s] [%s] [PID:%d] %s%s%s",
-            $timestamp,
-            $level,
-            $pid,
-            $message,
-            $contextJson ? " " : "",
-            $contextJson
-        ) . PHP_EOL;
-
-        if (!file_put_contents($this->logFile, $logMessage, FILE_APPEND | LOCK_EX)) {
-            error_log("Failed to write to log file: {$this->logFile}");
-        }
-    }
-
     private function log(string $level, string $message, array $context): void
     {
-        // Always log test messages and error messages
-        if (strpos($message, 'TEST_LOG') === 0 || strpos($message, 'DEBUG_VERIFY') === 0 || $level === 'ERROR') {
+        // Direct write for test messages and errors
+        if (
+            str_starts_with($message, 'TEST_LOG') ||
+            str_starts_with($message, 'DEBUG_VERIFY') ||
+            $level === 'ERROR'
+        ) {
             $this->writeLog($level, $message, $context);
             return;
         }
 
-        // For other messages, check the log level
-        if ($this->shouldLog($level)) {
+        // For other messages, check if we should log
+        if ($this->shouldLog($level, $message)) {
             $this->writeLog($level, $message, $context);
+        }
+    }
+
+    private function writeLog(string $level, string $message, array $context): void
+    {
+        try {
+            $this->rotateLogIfNeeded();
+
+            // Filter sensitive data from context
+            $filteredContext = $this->filterLogContext($context);
+
+            $timestamp = date('Y-m-d H:i:s');
+            $pid = getmypid();
+            $contextJson = !empty($filteredContext) ? json_encode($filteredContext, JSON_UNESCAPED_SLASHES) : '';
+
+            $logMessage = sprintf(
+                "[%s] [%s] [PID:%d] %s%s%s",
+                $timestamp,
+                $level,
+                $pid,
+                $message,
+                $contextJson ? " " : "",
+                $contextJson
+            ) . PHP_EOL;
+
+            // Add debug info for test messages
+            if (str_starts_with($message, 'TEST_LOG') || str_starts_with($message, 'DEBUG_VERIFY')) {
+                $debugInfo = sprintf(
+                    "[DEBUG] Log level: %s, Debug mode: %s, Config level: %s\n",
+                    $level,
+                    Config::getInstance()->isDebugMode() ? 'true' : 'false',
+                    Config::getInstance()->getEnv('LOG_LEVEL', 'unknown')
+                );
+                $logMessage = $debugInfo . $logMessage;
+            }
+
+            if (!file_put_contents($this->logFile, $logMessage, FILE_APPEND | LOCK_EX)) {
+                error_log("Failed to write to log file: {$this->logFile}");
+                // Try to write to PHP error log as fallback
+                error_log($logMessage);
+            }
+        } catch (Exception $e) {
+            error_log("Error writing to log file: " . $e->getMessage());
+            error_log($message);
         }
     }
 
