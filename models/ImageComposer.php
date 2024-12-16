@@ -31,11 +31,11 @@ class ImageComposer
             throw new Exception("No images provided for panel composition");
         }
 
-        // Log complete images array at start with VERIFICATION prefix
-        $this->logger->info("VERIFICATION - Starting panel composition", [
+        // Always log the complete input state
+        $this->logger->info("DEBUG_VERIFY - ComposePanel input state", [
             'total_images' => count($images),
             'scene_context' => $sceneContext,
-            'raw_images' => array_map(function ($url, $index) {
+            'images' => array_map(function ($url, $index) {
                 return [
                     'index' => $index,
                     'url' => $url,
@@ -45,9 +45,6 @@ class ImageComposer
                 ];
             }, $images, array_keys($images))
         ]);
-
-        // Get art style from scene context or use default
-        $artStyle = $sceneContext['style'] ?? 'default';
 
         try {
             // Create output directory if it doesn't exist
@@ -74,7 +71,7 @@ class ImageComposer
 
             // Process background first if it exists
             if (isset($images['background'])) {
-                $this->logger->info("VERIFICATION - Processing background image", [
+                $this->logger->info("DEBUG_VERIFY - Processing background", [
                     'image_url' => $images['background'],
                     'type' => $this->determineImageType($images['background'])
                 ]);
@@ -85,8 +82,9 @@ class ImageComposer
             // Calculate positions for characters
             $positions = $this->calculateCharacterPositions($images, $sceneContext, $panelWidth, $panelHeight);
 
-            // Log positions before processing
-            $this->logger->info("VERIFICATION - Character positions calculated", [
+            // Log all positions before processing
+            $this->logger->info("DEBUG_VERIFY - Character positions", [
+                'total_positions' => count($positions),
                 'positions' => array_map(function ($pos, $index) use ($images) {
                     return [
                         'index' => $index,
@@ -99,8 +97,16 @@ class ImageComposer
 
             // Add character images
             foreach ($images as $index => $imageUrl) {
+                // Always log the current image being processed
+                $this->logger->info("DEBUG_VERIFY - Processing image", [
+                    'index' => $index,
+                    'image_url' => $imageUrl,
+                    'has_position' => isset($positions[$index]),
+                    'type' => $this->determineImageType($imageUrl)
+                ]);
+
                 if (!isset($positions[$index])) {
-                    $this->logger->warning("VERIFICATION - No position found for image", [
+                    $this->logger->warning("DEBUG_VERIFY - Skipping image without position", [
                         'index' => $index,
                         'image_url' => $imageUrl
                     ]);
@@ -109,12 +115,12 @@ class ImageComposer
 
                 $pos = $positions[$index];
 
-                $this->logger->info("VERIFICATION - Processing character image", [
+                // Log before adding to panel
+                $this->logger->info("DEBUG_VERIFY - Adding image to panel", [
                     'index' => $index,
                     'image_url' => $imageUrl,
                     'position' => $pos,
-                    'type' => $this->determineImageType($imageUrl),
-                    'is_replicate_url' => strpos($imageUrl, 'replicate.delivery') !== false
+                    'type' => $this->determineImageType($imageUrl)
                 ]);
 
                 // Add the character image
@@ -127,10 +133,10 @@ class ImageComposer
                     $pos['height']
                 );
 
-                $this->logger->info("VERIFICATION - Character image added to panel", [
+                // Log after adding to panel
+                $this->logger->info("DEBUG_VERIFY - Image added successfully", [
                     'index' => $index,
-                    'position' => $pos,
-                    'success' => true
+                    'image_url' => $imageUrl
                 ]);
             }
 
@@ -138,7 +144,8 @@ class ImageComposer
             $outputPath = $this->outputDir . '/panel_' . uniqid() . '.png';
             $saveResult = imagepng($panel, $outputPath);
 
-            $this->logger->info("VERIFICATION - Panel saved", [
+            // Log the final result
+            $this->logger->info("DEBUG_VERIFY - Panel composition completed", [
                 'output_path' => $outputPath,
                 'save_success' => $saveResult,
                 'file_exists' => file_exists($outputPath),
