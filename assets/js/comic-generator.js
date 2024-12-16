@@ -214,6 +214,11 @@ export const ComicGenerator = {
         const url = this.getApiUrl(`public/temp/${predictionId}.json`);
         console.log('Polling URL:', url);
 
+        // Track cartoonification state
+        if (!this.cartoonificationState) {
+            this.cartoonificationState = new Map();
+        }
+
         $.ajax({
             url: url,
             type: 'GET',
@@ -226,15 +231,30 @@ export const ComicGenerator = {
                 });
 
                 if (result.status === 'succeeded') {
-                    if (result.type === 'panel') {
-                        // This is the final panel result
-                        this.displayGeneratedComic(result);
-                    } else {
-                        // This is just the cartoonification result, keep polling
-                        console.log('Cartoonification completed, waiting for panel generation...');
+                    if (result.type === 'cartoonification') {
+                        // Store cartoonification result
+                        this.cartoonificationState.set(predictionId, result.output);
+                        console.log('Cartoonification completed, waiting for panel generation...', {
+                            predictionId: predictionId,
+                            output: result.output
+                        });
                         setTimeout(() => {
                             this.checkResult(predictionId);
                         }, 5000);
+                    } else if (result.type === 'panel') {
+                        // Verify panel contains cartoonified image
+                        const cartoonifiedUrl = this.cartoonificationState.get(predictionId);
+                        if (cartoonifiedUrl && result.debug_info?.used_cartoonified_image === cartoonifiedUrl) {
+                            console.log('Panel generation completed with verified cartoonification');
+                            this.displayGeneratedComic(result);
+                        } else {
+                            console.error('Panel may not include cartoonified image:', {
+                                expected: cartoonifiedUrl,
+                                debug_info: result.debug_info
+                            });
+                            // Still display but log warning
+                            this.displayGeneratedComic(result);
+                        }
                     }
                 } else if (result.status === 'failed') {
                     console.error('Generation failed:', result.error);

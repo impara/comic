@@ -214,12 +214,20 @@ try {
                     'status' => 'succeeded',
                     'output' => is_array($data['output']) ? $data['output'][0] : $data['output'],
                     'type' => 'panel',
-                    'completed_at' => date('c')
+                    'completed_at' => date('c'),
+                    'debug_info' => [
+                        'used_cartoonified_image' => $data['cartoonified_image'] ?? null,
+                        'panel_id' => $predictionId,
+                        'original_id' => $mapping['original_prediction_id']
+                    ]
                 ]));
 
                 $logger->info("Final panel result written to original prediction file", [
                     'original_file' => $originalResultFile,
-                    'panel_output' => $data['output']
+                    'panel_output' => $data['output'],
+                    'debug_info' => [
+                        'used_cartoonified_image' => $data['cartoonified_image'] ?? null
+                    ]
                 ]);
 
                 // Clean up the mapping file
