@@ -13,10 +13,11 @@ try {
     $payload = file_get_contents('php://input');
     $data = json_decode($payload, true);
 
-    $logger->info("Webhook received", [
+    $logger->error("TEST_LOG - Webhook handler start", [
         'payload_length' => strlen($payload),
-        'data' => $data,
-        'request_headers' => getallheaders()
+        'has_data' => !empty($data),
+        'status' => $data['status'] ?? 'unknown',
+        'prediction_id' => $data['id'] ?? 'none'
     ]);
 
     if (!$data) {
@@ -79,16 +80,16 @@ try {
     foreach ($pendingFiles as $pendingFile) {
         $pending = json_decode(file_get_contents($pendingFile), true);
         if ($pending && isset($pending['prediction_id']) && $pending['prediction_id'] === $predictionId) {
-            $logger->info("Found matching pending cartoonification", [
+            $logger->error("TEST_LOG - Found matching cartoonification", [
                 'pending_file' => $pendingFile,
-                'prediction_id' => $predictionId
+                'prediction_id' => $predictionId,
+                'has_panel_data' => isset($pending['panel_data'])
             ]);
 
             // Store the result directly
             if ($data['status'] === 'succeeded' && !empty($data['output'])) {
-                $logger->info("Cartoonification completed successfully", [
-                    'original_image' => $pending['original_image'],
-                    'cartoonified_url' => is_array($data['output']) ? $data['output'][0] : $data['output']
+                $logger->error("TEST_LOG - Cartoonification succeeded", [
+                    'output_url' => is_array($data['output']) ? $data['output'][0] : $data['output']
                 ]);
 
                 // If this is a cartoonification completion, trigger panel generation
@@ -102,54 +103,24 @@ try {
                         throw new Exception("Invalid panel_data format");
                     }
 
-                    // Find the correct character index by matching prediction ID
-                    $characterIndex = -1;
-                    foreach ($panelData['characters'] as $index => $character) {
-                        if (isset($character['prediction_id']) && $character['prediction_id'] === $predictionId) {
-                            $characterIndex = $index;
-                            break;
-                        }
-                    }
-
-                    // If character not found by prediction ID, try to match using original character data
-                    if ($characterIndex === -1 && isset($pending['character_data'])) {
-                        foreach ($panelData['characters'] as $index => $character) {
-                            if ($character['id'] === $pending['character_data']['id']) {
-                                $characterIndex = $index;
-                                break;
-                            }
-                        }
-                    }
-
-                    if ($characterIndex === -1) {
-                        $logger->error("Could not find character with prediction ID", [
-                            'prediction_id' => $predictionId,
-                            'characters' => $panelData['characters'],
-                            'pending_data' => $pending
-                        ]);
-                        throw new Exception("Character not found for prediction ID: $predictionId");
-                    }
-
-                    // Update the specific character with cartoonified image
-                    $cartoonifiedUrl = is_array($data['output']) ? $data['output'][0] : $data['output'];
-                    $panelData['characters'][$characterIndex] = array_merge(
-                        $panelData['characters'][$characterIndex],
-                        [
-                            'cartoonified_image' => $cartoonifiedUrl,
-                            'image' => $cartoonifiedUrl,
-                            'prediction_id' => $predictionId
+                    $logger->error("TEST_LOG - About to create ComicGenerator", [
+                        'panel_data' => [
+                            'character_count' => count($panelData['characters'] ?? []),
+                            'has_scene_description' => isset($panelData['scene_description'])
                         ]
-                    );
-
-                    $logger->info("Updated character with cartoonified image", [
-                        'character_index' => $characterIndex,
-                        'character_id' => $panelData['characters'][$characterIndex]['id'],
-                        'cartoonified_url' => $cartoonifiedUrl
                     ]);
 
                     // Create a new ComicGenerator instance
                     require_once __DIR__ . '/models/ComicGenerator.php';
                     $comicGenerator = new ComicGenerator($logger);
+
+                    $logger->error("TEST_LOG - About to call generatePanel", [
+                        'character_count' => count($panelData['characters']),
+                        'first_character' => isset($panelData['characters'][0]) ? [
+                            'id' => $panelData['characters'][0]['id'] ?? 'unknown',
+                            'has_cartoonified' => isset($panelData['characters'][0]['cartoonified_image'])
+                        ] : null
+                    ]);
 
                     // Generate the final panel, passing the original prediction ID
                     $panelResult = $comicGenerator->generatePanel(
@@ -158,9 +129,12 @@ try {
                         $predictionId
                     );
 
-                    $logger->info("Panel generation initiated", [
-                        'prediction_id' => $predictionId,
-                        'panel_result' => $panelResult
+                    $logger->error("TEST_LOG - Panel generation completed", [
+                        'result' => [
+                            'status' => $panelResult['status'] ?? 'unknown',
+                            'has_output' => isset($panelResult['output']),
+                            'prediction_id' => $predictionId
+                        ]
                     ]);
 
                     // Clean up the pending file since we're done with cartoonification
@@ -168,9 +142,9 @@ try {
                     return;
                 }
             } elseif ($data['status'] === 'failed') {
-                $logger->error("Cartoonification failed", [
+                $logger->error("TEST_LOG - Cartoonification failed", [
                     'error' => $data['error'] ?? 'Unknown error',
-                    'original_image' => $pending['original_image']
+                    'prediction_id' => $predictionId
                 ]);
                 @unlink($pendingFile);
             }
@@ -183,7 +157,7 @@ try {
     foreach ($mappingFiles as $mappingFile) {
         $mapping = json_decode(file_get_contents($mappingFile), true);
         if ($mapping && isset($mapping['panel_prediction_id']) && $mapping['panel_prediction_id'] === $predictionId) {
-            $logger->info("Found matching panel prediction mapping", [
+            $logger->error("TEST_LOG - Found matching panel prediction", [
                 'mapping_file' => $mappingFile,
                 'original_id' => $mapping['original_prediction_id'],
                 'panel_id' => $predictionId
