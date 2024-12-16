@@ -99,7 +99,7 @@ class CharacterProcessor
 
             $panelData = [
                 'characters' => [$character],
-                'scene_description' => $character['scene_description'] ?? ''
+                'scene_description' => $character['options']['scene_description'] ?? $character['scene_description'] ?? ''
             ];
 
             $pendingData = [
@@ -113,15 +113,15 @@ class CharacterProcessor
             $this->logger->error("TEST_LOG - Starting cartoonification", [
                 'character_id' => $character['id'],
                 'prediction_id' => $predictionId,
-                'has_scene_description' => isset($character['scene_description']),
-                'scene_description' => $character['scene_description'] ?? 'none',
+                'has_scene_description' => isset($character['options']['scene_description']) || isset($character['scene_description']),
+                'scene_description' => $character['options']['scene_description'] ?? $character['scene_description'] ?? 'none',
                 'style' => $character['options']['style'] ?? 'default'
             ]);
 
             $this->logger->error("TEST_LOG - Creating pending file", [
                 'file' => basename($pendingFile),
                 'prediction_id' => $predictionId,
-                'has_scene_description' => isset($character['scene_description']),
+                'has_scene_description' => isset($character['options']['scene_description']) || isset($character['scene_description']),
                 'panel_data' => $panelData,
                 'pending_data' => $pendingData
             ]);

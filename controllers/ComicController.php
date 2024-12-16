@@ -73,48 +73,65 @@ class ComicController
             // Validate input
             $this->validateInput($input);
 
-            // Generate the comic panel
-            $result = $this->comicGenerator->generatePanel(
-                $input['characters'],
-                $input['scene_description']
-            );
+            // Process each character
+            foreach ($input['characters'] as $character) {
+                // Add scene description to character options
+                if (!isset($character['options'])) {
+                    $character['options'] = [];
+                }
+                $character['options']['scene_description'] = $input['scene_description'];
+                $character['options']['style'] = $input['art_style'] ?? 'modern';
 
-            // If result indicates processing, return that status
-            if (isset($result['status']) && $result['status'] === 'processing') {
-                $this->logger->info('Comic generation in processing state', [
-                    'result' => $result
+                $this->logger->error("TEST_LOG - Processing character with scene", [
+                    'character_id' => $character['id'],
+                    'has_scene_description' => isset($character['options']['scene_description']),
+                    'scene_description' => $character['options']['scene_description'],
+                    'style' => $character['options']['style']
                 ]);
 
-                // Get the first prediction ID to use as the main one
-                $mainPredictionId = $result['pending_predictions'][0];
+                // Generate the comic panel
+                $result = $this->comicGenerator->generatePanel(
+                    [$character],
+                    $input['scene_description']
+                );
 
-                // Update the pending file with panel data
-                $tempPath = $this->config->getTempPath();
-                $pendingFile = $tempPath . "pending_{$mainPredictionId}.json";
-                if (file_exists($pendingFile)) {
-                    $pending = json_decode(file_get_contents($pendingFile), true);
-                    $pending['panel_data'] = json_encode([
-                        'characters' => $input['characters'],
-                        'scene_description' => $input['scene_description']
+                // If result indicates processing, return that status
+                if (isset($result['status']) && $result['status'] === 'processing') {
+                    $this->logger->info('Comic generation in processing state', [
+                        'result' => $result
                     ]);
-                    file_put_contents($pendingFile, json_encode($pending));
+
+                    // Get the first prediction ID to use as the main one
+                    $mainPredictionId = $result['pending_predictions'][0];
+
+                    // Update the pending file with panel data
+                    $tempPath = $this->config->getTempPath();
+                    $pendingFile = $tempPath . "pending_{$mainPredictionId}.json";
+                    if (file_exists($pendingFile)) {
+                        $pending = json_decode(file_get_contents($pendingFile), true);
+                        $pending['panel_data'] = json_encode([
+                            'characters' => [$character],
+                            'scene_description' => $input['scene_description']
+                        ]);
+                        file_put_contents($pendingFile, json_encode($pending));
+                    }
+
+                    echo json_encode([
+                        'success' => true,
+                        'message' => $result['message'],
+                        'result' => [
+                            'id' => $mainPredictionId,
+                            'status' => 'processing',
+                            'pending_predictions' => $result['pending_predictions']
+                        ]
+                    ]);
+                    return;
                 }
 
-                echo json_encode([
-                    'success' => true,
-                    'message' => $result['message'],
-                    'result' => [
-                        'id' => $mainPredictionId,
-                        'status' => 'processing',
-                        'pending_predictions' => $result['pending_predictions']
-                    ]
+                $this->logger->info('Comic generation successful', [
+                    'result' => $result
                 ]);
-                return;
             }
-
-            $this->logger->info('Comic generation successful', [
-                'result' => $result
-            ]);
 
             // Return the result
             echo json_encode([
