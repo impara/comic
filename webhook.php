@@ -120,7 +120,8 @@ try {
                     'status' => 'succeeded',
                     'type' => 'cartoonification',
                     'output' => is_array($data['output']) ? $data['output'][0] : $data['output'],
-                    'completed_at' => date('c')
+                    'completed_at' => date('c'),
+                    'original_prediction_id' => $pending['original_prediction_id'] ?? null
                 ];
                 file_put_contents($tempPath . "{$predictionId}.json", json_encode($cartoonificationResult));
 
@@ -148,13 +149,23 @@ try {
 
                     $panelData['characters'][0]['cartoonified_image'] = $cartoonifiedUrl;
 
+                    // Store cartoonification mapping
+                    $cartoonificationMappingFile = $tempPath . "cartoonification_{$predictionId}.json";
+                    file_put_contents($cartoonificationMappingFile, json_encode([
+                        'prediction_id' => $predictionId,
+                        'character_id' => $panelData['characters'][0]['id'],
+                        'cartoonified_url' => $cartoonifiedUrl,
+                        'created_at' => date('c')
+                    ]));
+
                     // Log the updated panel data before generating panel
                     $logger->error("TEST_LOG - Updated panel data with cartoonified image", [
                         'character_id' => $panelData['characters'][0]['id'],
                         'cartoonified_url' => $cartoonifiedUrl,
                         'scene_description' => $panelData['scene_description'],
                         'full_panel_data' => $panelData,
-                        'original_pending_file' => basename($pendingFile)
+                        'original_pending_file' => basename($pendingFile),
+                        'cartoonification_mapping' => basename($cartoonificationMappingFile)
                     ]);
 
                     // Now call generatePanel() with updated panelData
@@ -186,7 +197,8 @@ try {
                             'status' => $panelResult['status'] ?? 'unknown',
                             'has_output' => isset($panelResult['output']),
                             'prediction_id' => $predictionId,
-                            'panel_id' => $panelResult['id'] ?? null
+                            'panel_id' => $panelResult['id'] ?? null,
+                            'cartoonified_url' => $cartoonifiedUrl
                         ]
                     ]);
 
