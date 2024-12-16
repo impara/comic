@@ -31,13 +31,17 @@ class ImageComposer
             throw new Exception("No images provided for panel composition");
         }
 
-        // Log complete images array at start
-        $this->logger->info("Starting panel composition with images", [
+        // Log complete images array at start with VERIFICATION prefix
+        $this->logger->info("VERIFICATION - Starting panel composition", [
+            'total_images' => count($images),
+            'scene_context' => $sceneContext,
             'raw_images' => array_map(function ($url, $index) {
                 return [
                     'index' => $index,
                     'url' => $url,
-                    'type' => $this->determineImageType($url)
+                    'type' => $this->determineImageType($url),
+                    'is_replicate_url' => strpos($url, 'replicate.delivery') !== false,
+                    'url_length' => strlen($url)
                 ];
             }, $images, array_keys($images))
         ]);
@@ -70,7 +74,7 @@ class ImageComposer
 
             // Process background first if it exists
             if (isset($images['background'])) {
-                $this->logger->info("composePanel: Adding background image", [
+                $this->logger->info("VERIFICATION - Processing background image", [
                     'image_url' => $images['background'],
                     'type' => $this->determineImageType($images['background'])
                 ]);
@@ -81,17 +85,36 @@ class ImageComposer
             // Calculate positions for characters
             $positions = $this->calculateCharacterPositions($images, $sceneContext, $panelWidth, $panelHeight);
 
+            // Log positions before processing
+            $this->logger->info("VERIFICATION - Character positions calculated", [
+                'positions' => array_map(function ($pos, $index) use ($images) {
+                    return [
+                        'index' => $index,
+                        'position' => $pos,
+                        'image_url' => $images[$index],
+                        'image_type' => $this->determineImageType($images[$index])
+                    ];
+                }, $positions, array_keys($positions))
+            ]);
+
             // Add character images
             foreach ($images as $index => $imageUrl) {
-                if (!isset($positions[$index])) continue;
+                if (!isset($positions[$index])) {
+                    $this->logger->warning("VERIFICATION - No position found for image", [
+                        'index' => $index,
+                        'image_url' => $imageUrl
+                    ]);
+                    continue;
+                }
 
                 $pos = $positions[$index];
 
-                $this->logger->info("composePanel: Adding image at index", [
+                $this->logger->info("VERIFICATION - Processing character image", [
                     'index' => $index,
                     'image_url' => $imageUrl,
                     'position' => $pos,
-                    'type' => $this->determineImageType($imageUrl)
+                    'type' => $this->determineImageType($imageUrl),
+                    'is_replicate_url' => strpos($imageUrl, 'replicate.delivery') !== false
                 ]);
 
                 // Add the character image
@@ -103,18 +126,27 @@ class ImageComposer
                     $pos['width'],
                     $pos['height']
                 );
+
+                $this->logger->info("VERIFICATION - Character image added to panel", [
+                    'index' => $index,
+                    'position' => $pos,
+                    'success' => true
+                ]);
             }
 
             // Save the composed panel
             $outputPath = $this->outputDir . '/panel_' . uniqid() . '.png';
-            imagepng($panel, $outputPath);
-            imagedestroy($panel);
+            $saveResult = imagepng($panel, $outputPath);
 
-            $this->logger->info("Panel composition completed", [
+            $this->logger->info("VERIFICATION - Panel saved", [
                 'output_path' => $outputPath,
-                'total_images_processed' => count($images) + (isset($images['background']) ? 1 : 0)
+                'save_success' => $saveResult,
+                'file_exists' => file_exists($outputPath),
+                'file_size' => file_exists($outputPath) ? filesize($outputPath) : 0,
+                'total_images_processed' => count($images)
             ]);
 
+            imagedestroy($panel);
             return $outputPath;
         } catch (Exception $e) {
             $this->logger->error("Failed to compose panel", [

@@ -118,51 +118,52 @@ class ComicGenerator
                 'style' => $characters[0]['options']['style'] ?? 'modern'
             ];
 
-            // Log processed characters and character images before composition
-            $this->logger->info("Processed characters before panel composition", [
-                'processed_characters' => array_map(function ($char) {
+            // Always log the full state of characters and images before composition
+            $this->logger->info("VERIFICATION - Full character state before composition", [
+                'characters' => array_map(function ($char) {
                     return [
                         'id' => $char['id'] ?? 'unknown',
+                        'name' => $char['name'] ?? 'unknown',
+                        'has_image' => isset($char['image']),
+                        'image_url' => $char['image'] ?? null,
                         'has_cartoonified' => isset($char['cartoonified_image']),
                         'cartoonified_url' => $char['cartoonified_image'] ?? null,
-                        'original_url' => $char['image'] ?? null
+                        'has_prediction_id' => isset($char['prediction_id']),
+                        'prediction_id' => $char['prediction_id'] ?? null
                     ];
-                }, $processedCharacters)
+                }, $characters)
             ]);
 
-            // Log detailed image usage for each character
-            foreach ($characters as $index => $character) {
-                if (isset($character['cartoonified_image'])) {
-                    $this->logger->info("Using cartoonified_image for character", [
-                        'character_id' => $character['id'] ?? 'unknown',
-                        'index' => $index,
-                        'cartoonified_image_url' => $character['cartoonified_image']
-                    ]);
-                } else {
-                    $this->logger->info("No cartoonified_image found, using original image", [
-                        'character_id' => $character['id'] ?? 'unknown',
-                        'index' => $index,
-                        'image_url' => $character['image'] ?? 'none'
-                    ]);
-                }
-            }
-
-            // Log final character images array that will be used in composition
-            $this->logger->info("Character images being sent to composePanel", [
+            // Log the exact state of characterImages array
+            $this->logger->info("VERIFICATION - Character images being sent to panel composition", [
                 'character_count' => count($characterImages),
-                'images' => array_map(function ($url, $index) use ($characters) {
+                'character_images' => array_map(function ($url, $index) {
                     return [
                         'index' => $index,
-                        'character_id' => $characters[$index]['id'] ?? 'unknown',
-                        'image_url' => $url,
-                        'is_cartoonified' => isset($characters[$index]['cartoonified_image'])
+                        'url' => $url,
+                        'is_replicate_url' => strpos($url, 'replicate.delivery') !== false
                     ];
                 }, $characterImages, array_keys($characterImages))
             ]);
 
             // Compose the panel using ImageComposer
             $imageComposer = new ImageComposer($this->logger);
+
+            // Log right before calling composePanel
+            $this->logger->info("VERIFICATION - Calling composePanel", [
+                'character_images_count' => count($characterImages),
+                'scene_context' => $sceneContext,
+                'first_image_url' => reset($characterImages) ?: 'none'
+            ]);
+
             $composedPanelPath = $imageComposer->composePanel($characterImages, $sceneContext);
+
+            // Log after panel composition
+            $this->logger->info("VERIFICATION - Panel composition completed", [
+                'composed_panel_path' => $composedPanelPath,
+                'exists' => file_exists($composedPanelPath),
+                'size' => file_exists($composedPanelPath) ? filesize($composedPanelPath) : 0
+            ]);
 
             // Generate the final panel with background and composition
             $result = $this->replicateClient->generateImage([
