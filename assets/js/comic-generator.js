@@ -244,282 +244,85 @@ export const ComicGenerator = {
             return;
         }
 
-        // Try all possible file patterns
+        // Check for panel result first
         const panelApiUrl = this.getApiUrl(`public/temp/panel_${predictionId}.json`);
-        const pendingApiUrl = this.getApiUrl(`public/temp/pending_${predictionId}.json`);
-        const directApiUrl = this.getApiUrl(`public/temp/${predictionId}.json`);
-        const mappingApiUrl = this.getApiUrl(`public/temp/mapping_${predictionId}.json`);
 
-        console.log('Checking URLs:', {
-            panel: panelApiUrl,
-            pending: pendingApiUrl,
-            direct: directApiUrl,
-            mapping: mappingApiUrl
-        });
+        $.ajax({
+            url: panelApiUrl,
+            type: 'GET',
+            dataType: 'json',
+            success: (result) => {
+                console.log('Result check response:', result);
 
-        // Try files in order: panel -> direct -> pending -> mapping
-        this.tryLoadFile(panelApiUrl)
-            .then(result => {
-                if (result) {
-                    this.handleResultResponse(result, predictionId);
-                } else {
-                    return this.tryLoadFile(directApiUrl);
-                }
-            })
-            .then(result => {
-                if (result) {
-                    this.handleResultResponse(result, predictionId);
-                } else {
-                    return this.tryLoadFile(pendingApiUrl);
-                }
-            })
-            .then(result => {
-                if (result) {
-                    this.handleResultResponse(result, predictionId);
-                } else {
-                    return this.tryLoadFile(mappingApiUrl);
-                }
-            })
-            .then(result => {
-                if (result) {
-                    // Handle mapping file
-                    if (result.cartoonified_images) {
-                        this.cartoonificationState.set(predictionId, {
-                            status: 'completed',
-                            output: result.cartoonified_images[0],
-                            completed_at: new Date(result.created_at).getTime(),
-                            original_prediction_id: result.original_prediction_id
-                        });
-
-                        // Continue polling original panel
-                        if (result.panel_prediction_id) {
-                            setTimeout(() => this.checkResult(result.panel_prediction_id), 5000);
-                        }
-                    }
-                } else {
-                    // No files found, continue polling
-                    setTimeout(() => this.checkResult(predictionId), 5000);
-                }
-            })
-            .catch(error => {
-                console.error('Error checking files:', error);
-                setTimeout(() => this.checkResult(predictionId), 5000);
-            });
-    },
-
-    tryLoadFile(url) {
-        return new Promise((resolve, reject) => {
-            $.ajax({
-                url: url,
-                type: 'GET',
-                dataType: 'json',
-                success: (result) => resolve(result),
-                error: (xhr) => {
-                    if (xhr.status === 404) {
-                        resolve(null);
-                    } else {
-                        reject(xhr);
-                    }
-                }
-            });
-        });
-    },
-
-    handleStateFile(state, predictionId) {
-        if (state.cartoonification_requests) {
-            // Update cartoonification states from state file
-            state.cartoonification_requests.forEach(request => {
-                this.cartoonificationState.set(request.prediction_id, {
-                    status: request.status,
-                    output: request.cartoonified_url,
-                    completed_at: request.completed_at * 1000,
-                    original_prediction_id: state.panel_prediction_id
-                });
-            });
-
-            // Calculate progress
-            const completedCount = state.cartoonification_requests.filter(r => r.status === 'succeeded').length;
-            const totalCount = state.cartoonification_requests.length;
-            const progress = 25 + ((completedCount / totalCount) * 25);
-            $('.progress-bar').css('width', `${progress}%`);
-
-            // Update UI
-            $('#debugInfo').html(`
-                <p>Processing cartoonifications...</p>
-                <p>Progress: ${completedCount} of ${totalCount} completed</p>
-            `);
-        }
-
-        // Continue polling
-        setTimeout(() => this.checkResult(predictionId), 5000);
-    },
-
-    handleResultResponse(result, predictionId) {
-        console.log('Result check response:', {
-            status: result.status,
-            type: result.type,
-            has_output: !!result.output,
-            has_debug_info: !!result.debug_info,
-            cartoonified_images: result.debug_info?.used_cartoonified_images,
-            raw: result
-        });
-
-        if (result.status === 'succeeded' || result.status === 'processing') {
-            if (result.type === 'panel' || result.panel_id) {
-                // Store panel ID if available
-                if (result.panel_id && !this.originalPanelId) {
-                    this.originalPanelId = result.panel_id;
-                    console.log('Setting original panel ID:', this.originalPanelId);
-                }
-
-                // Check if we have panel output
-                if (result.output) {
-                    console.log('Panel generation completed with output:', result.output);
+                if (result.status === 'succeeded' && result.output) {
                     this.displayGeneratedComic(result);
-                    return;
-                }
-
-                // Check if we have pending cartoonifications
-                if (result.pending_predictions && result.pending_predictions.length > 0) {
-                    console.log('Panel has pending cartoonifications:', result.pending_predictions);
-
-                    // Update progress bar based on completed cartoonifications
-                    const totalCartoonifications = result.pending_predictions.length;
-                    const completedCartoonifications = Array.from(this.cartoonificationState.values())
-                        .filter(state => state.status === 'completed').length;
-                    const progress = 25 + ((completedCartoonifications / totalCartoonifications) * 25);
-                    $('.progress-bar').css('width', `${progress}%`);
-
-                    // Update UI to show cartoonification progress
-                    $('#debugInfo').html(`
-                        <p>Cartoonifying characters...</p>
-                        <p>Progress: ${completedCartoonifications} of ${totalCartoonifications} completed</p>
-                        <p>Pending IDs: ${result.pending_predictions.join(', ')}</p>
-                    `);
-
-                    // Start tracking each pending cartoonification
-                    result.pending_predictions.forEach(predId => {
-                        if (!this.cartoonificationState.has(predId)) {
-                            this.cartoonificationState.set(predId, {
-                                status: 'pending',
-                                started_at: new Date().getTime(),
-                                original_prediction_id: this.originalPanelId || predictionId
-                            });
-                            setTimeout(() => this.checkResult(predId), 5000);
+                } else {
+                    // If panel not ready, check original prediction
+                    const originalApiUrl = this.getApiUrl(`public/temp/${predictionId}.json`);
+                    $.ajax({
+                        url: originalApiUrl,
+                        type: 'GET',
+                        dataType: 'json',
+                        success: (originalResult) => {
+                            if (originalResult.panel_id) {
+                                setTimeout(() => this.checkResult(originalResult.panel_id), 5000);
+                            } else {
+                                setTimeout(() => this.checkResult(predictionId), 5000);
+                            }
+                        },
+                        error: () => {
+                            setTimeout(() => this.checkResult(predictionId), 5000);
                         }
                     });
-
-                    // Continue polling this panel
-                    setTimeout(() => this.checkResult(this.originalPanelId || predictionId), 5000);
-                    return;
                 }
-
-                // If status is processing, continue polling
-                if (result.status === 'processing') {
-                    setTimeout(() => this.checkResult(predictionId), 5000);
-                    return;
-                }
-
-                // If we get here, panel is complete but may be missing output
-                console.error('Panel completed but missing output:', result);
-                this.handleGenerationError('Panel generation completed but output is missing');
-            } else if (result.type === 'cartoonification') {
-                console.log('Cartoonification completed:', result);
-
-                // Update UI to show progress
-                const completedCount = Array.from(this.cartoonificationState.values())
-                    .filter(state => state.status === 'completed').length + 1;
-
-                // Update progress bar for cartoonification phase (25-50%)
-                const totalCartoonifications = this.cartoonificationState.size;
-                const progress = 25 + ((completedCount / totalCartoonifications) * 25);
-                $('.progress-bar').css('width', `${progress}%`);
-
-                $('#debugInfo').html(`
-                    <p>Character cartoonification completed: ${completedCount} of ${totalCartoonifications}</p>
-                    <p>Processing final panel...</p>
-                `);
-
-                // Store the cartoonified image URL
-                this.cartoonificationState.set(predictionId, {
-                    status: 'completed',
-                    output: result.output,
-                    completed_at: new Date().getTime(),
-                    original_prediction_id: this.originalPanelId
-                });
-
-                // Continue polling the original prediction
-                if (this.originalPanelId) {
-                    console.log('Continuing to poll original panel:', this.originalPanelId);
-                    setTimeout(() => this.checkResult(this.originalPanelId), 5000);
+            },
+            error: (xhr) => {
+                if (xhr.status === 404) {
+                    // If panel not found, check original prediction
+                    const originalApiUrl = this.getApiUrl(`public/temp/${predictionId}.json`);
+                    $.ajax({
+                        url: originalApiUrl,
+                        type: 'GET',
+                        dataType: 'json',
+                        success: (originalResult) => {
+                            if (originalResult.panel_id) {
+                                setTimeout(() => this.checkResult(originalResult.panel_id), 5000);
+                            } else {
+                                setTimeout(() => this.checkResult(predictionId), 5000);
+                            }
+                        },
+                        error: () => {
+                            setTimeout(() => this.checkResult(predictionId), 5000);
+                        }
+                    });
                 } else {
-                    console.error('Could not find original panel ID to continue polling');
-                    this.handleGenerationError('Lost track of panel generation. Please try again.');
+                    this.handleGenerationError('Failed to check generation status');
                 }
             }
-        } else if (result.status === 'failed') {
-            console.error('Generation failed:', result);
-            this.handleGenerationError(result.error || 'Generation failed');
-        } else {
-            // Continue polling for incomplete status
-            setTimeout(() => this.checkResult(predictionId), 5000);
-        }
+        });
     },
 
-    handleFinalResult(result) {
-        // Clear polling interval
+    displayGeneratedComic(result) {
+        // Clear any polling interval
         if (this.pollingInterval) {
             clearInterval(this.pollingInterval);
             this.pollingInterval = null;
         }
 
-        // Clean up state tracking
-        if (result.id) {
-            this.cartoonificationState.delete(result.id);
-            this.processStages.delete(result.id);
-        }
-
-        // Update progress to 100%
-        $('.progress-bar').css('width', '100%');
-
         // Display the final image
         const imageUrl = result.output;
-        const cartoonifiedUrl = result.cartoonified_url;
-
-        $('#debugInfo').html(`
-            <p>Generation completed successfully!</p>
-            ${cartoonifiedUrl ? `
-                <div class="mb-3">
-                    <h5>Cartoonified Character:</h5>
-                    <img src="${cartoonifiedUrl}" alt="Cartoonified character" class="img-fluid mb-2" style="max-width: 300px">
-                </div>
-            ` : ''}
-            <div>
-                <h5>Final Panel:</h5>
-                <img src="${imageUrl}" alt="Generated panel" class="img-fluid" style="max-width: 500px">
-            </div>
-        `);
-
-        // Enable the generate button again
+        $('.comic-preview').html(`<img src="${imageUrl}" alt="Generated panel" class="img-fluid">`);
         UIManager.showGenerateButton();
     },
 
     handleGenerationError(error) {
-        // Clear polling interval
         if (this.pollingInterval) {
             clearInterval(this.pollingInterval);
             this.pollingInterval = null;
         }
 
-        // Clean up all state tracking
-        this.cartoonificationState.clear();
-        this.processStages.clear();
-
         console.error('Generation error:', error);
-        $('#debugInfo').html(`
-            <p class="text-danger">Error: ${error}</p>
-            <p class="text-muted">Please try again. If the problem persists, try refreshing the page.</p>
-        `);
+        $('#debugInfo').html(`<p class="text-danger">Error: ${error}</p>`);
         UIManager.showGenerateButton();
     }
 }; 
