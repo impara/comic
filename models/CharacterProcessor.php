@@ -100,6 +100,10 @@ class CharacterProcessor
                 'prediction_id' => $predictionId,
                 'original_image' => $character['image'],
                 'character_data' => $character,
+                'panel_data' => json_encode([
+                    'characters' => [$character],
+                    'scene_description' => $character['scene_description'] ?? ''
+                ]),
                 'started_at' => time()
             ]));
 
