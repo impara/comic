@@ -259,6 +259,13 @@ export const ComicGenerator = {
     },
 
     checkResult(predictionId) {
+        // Prevent polling with null/undefined IDs
+        if (!predictionId) {
+            console.error('Invalid prediction ID (null/undefined)');
+            this.handleGenerationError('Invalid generation ID. Please try again.');
+            return;
+        }
+
         const apiUrl = this.getApiUrl(`public/temp/${predictionId}.json`);
         console.log('Polling URL:', apiUrl);
 
@@ -295,6 +302,13 @@ export const ComicGenerator = {
             type: 'GET',
             dataType: 'json',
             success: (result) => {
+                // Validate result has required fields
+                if (!result || !result.status) {
+                    console.error('Invalid result format:', result);
+                    this.handleGenerationError('Invalid response format from server');
+                    return;
+                }
+
                 // Update last_update time on successful response
                 if (stages) {
                     stages.last_update = Date.now();
@@ -313,7 +327,9 @@ export const ComicGenerator = {
                     if (result.type === 'panel') {
                         // Final panel is complete
                         this.handleFinalResult(result);
-                    } else if (result.cartoonified_url) {
+                    } else if (result.cartoonified_url || (result.output && typeof result.output === 'string')) {
+                        // Handle both cartoonified_url and direct output formats
+                        const cartoonifiedUrl = result.cartoonified_url || result.output;
                         // Cartoonification complete, now in SDXL stage
                         const stages = this.processStages.get(result.id) || {};
                         stages.current = 'sdxl';
@@ -323,7 +339,10 @@ export const ComicGenerator = {
                         stages.last_update = Date.now(); // Update timestamp
                         this.processStages.set(result.id, stages);
 
-                        this.updateProgressUI(result);
+                        this.updateProgressUI({
+                            ...result,
+                            cartoonified_url: cartoonifiedUrl
+                        });
 
                         // Reset retry count for SDXL stage
                         const state = this.cartoonificationState.get(result.id);

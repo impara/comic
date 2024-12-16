@@ -312,20 +312,24 @@ try {
         $mapping = json_decode(file_get_contents($mappingFile), true);
         if ($mapping && isset($mapping['panel_prediction_id']) && $mapping['panel_prediction_id'] === $predictionId) {
             $logger->error("TEST_LOG - Found matching panel prediction", [
-                'mapping_file' => $mappingFile,
+                'mapping_file' => basename($mappingFile),
                 'original_id' => $mapping['original_prediction_id'],
                 'panel_id' => $predictionId
             ]);
 
             if ($data['status'] === 'succeeded' && !empty($data['output'])) {
+                // Get the original prediction ID, fallback to panel ID if not available
+                $originalPredictionId = $mapping['original_prediction_id'] ?: $predictionId;
+
                 // Write the final result to the original prediction file
-                $originalResultFile = $tempPath . "{$mapping['original_prediction_id']}.json";
+                $originalResultFile = $tempPath . "{$originalPredictionId}.json";
 
                 // Get cartoonified images from mapping
                 $cartoonifiedImages = $mapping['cartoonified_images'] ?? [];
 
                 $logger->error("TEST_LOG - Verifying cartoonified image usage", [
                     'panel_id' => $predictionId,
+                    'original_id' => $originalPredictionId,
                     'cartoonified_images' => $cartoonifiedImages,
                     'has_output' => !empty($data['output']),
                     'output_type' => is_array($data['output']) ? 'array' : 'string',
@@ -343,8 +347,17 @@ try {
                     ]);
                 }
 
+                // Ensure we have a valid ID for the result file
+                if (empty($originalPredictionId)) {
+                    $originalPredictionId = 'panel_' . uniqid('', true);
+                    $logger->error("Generated new ID for missing original prediction", [
+                        'new_id' => $originalPredictionId,
+                        'panel_id' => $predictionId
+                    ]);
+                }
+
                 file_put_contents($originalResultFile, json_encode([
-                    'id' => $mapping['original_prediction_id'],
+                    'id' => $originalPredictionId,
                     'status' => 'succeeded',
                     'type' => 'panel',
                     'output' => is_array($data['output']) ? $data['output'][0] : $data['output'],
@@ -353,7 +366,7 @@ try {
                     'debug_info' => [
                         'used_cartoonified_images' => $validCartoonifiedImages,
                         'panel_id' => $predictionId,
-                        'original_id' => $mapping['original_prediction_id'],
+                        'original_id' => $originalPredictionId,
                         'cartoonification_status' => [
                             'total_images' => count($cartoonifiedImages),
                             'valid_images' => count($validCartoonifiedImages),
@@ -364,6 +377,7 @@ try {
 
                 $logger->info("Final panel result written to original prediction file", [
                     'original_file' => $originalResultFile,
+                    'original_id' => $originalPredictionId,
                     'panel_output' => $data['output'],
                     'debug_info' => [
                         'used_cartoonified_images' => $validCartoonifiedImages
@@ -375,9 +389,11 @@ try {
                 return;
             } elseif ($data['status'] === 'failed') {
                 // If panel generation failed, update the original prediction with the error
-                $originalResultFile = $tempPath . "{$mapping['original_prediction_id']}.json";
+                $originalPredictionId = $mapping['original_prediction_id'] ?: $predictionId;
+                $originalResultFile = $tempPath . "{$originalPredictionId}.json";
+
                 file_put_contents($originalResultFile, json_encode([
-                    'id' => $mapping['original_prediction_id'],
+                    'id' => $originalPredictionId,
                     'status' => 'failed',
                     'error' => $data['error'] ?? 'Panel generation failed',
                     'type' => 'panel',
@@ -386,7 +402,7 @@ try {
 
                 $logger->error("Panel generation failed", [
                     'error' => $data['error'] ?? 'Unknown error',
-                    'original_id' => $mapping['original_prediction_id']
+                    'original_id' => $originalPredictionId
                 ]);
 
                 // Clean up the mapping file
