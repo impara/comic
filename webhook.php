@@ -325,18 +325,45 @@ try {
                     $pending = json_decode(file_get_contents($pendingFile), true);
                     if ($pending && isset($pending['original_prediction_id'])) {
                         $originalPredictionId = $pending['original_prediction_id'];
+                        $logger->error("TEST_LOG - Found original ID in pending file", [
+                            'pending_file' => basename($pendingFile),
+                            'original_id' => $originalPredictionId
+                        ]);
                         break;
                     }
                 }
 
                 // If not found in pending files, try mapping file
-                if (!$originalPredictionId) {
+                if (!$originalPredictionId && isset($mapping['original_prediction_id'])) {
                     $originalPredictionId = $mapping['original_prediction_id'];
+                    $logger->error("TEST_LOG - Using original ID from mapping file", [
+                        'mapping_file' => basename($mappingFile),
+                        'original_id' => $originalPredictionId
+                    ]);
+                }
+
+                // If still not found, check state files
+                if (!$originalPredictionId) {
+                    $stateFiles = glob($tempPath . "state_*.json");
+                    foreach ($stateFiles as $stateFile) {
+                        $state = json_decode(file_get_contents($stateFile), true);
+                        if ($state && isset($state['id'])) {
+                            $originalPredictionId = $state['id'];
+                            $logger->error("TEST_LOG - Found original ID in state file", [
+                                'state_file' => basename($stateFile),
+                                'original_id' => $originalPredictionId
+                            ]);
+                            break;
+                        }
+                    }
                 }
 
                 // If still not found, use panel ID
                 if (!$originalPredictionId) {
                     $originalPredictionId = $predictionId;
+                    $logger->error("TEST_LOG - Using panel ID as fallback", [
+                        'panel_id' => $predictionId
+                    ]);
                 }
 
                 // Write the final result to the original prediction file

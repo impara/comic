@@ -242,6 +242,20 @@ class ReplicateClient
                     'webhook_events_filter' => ['completed']
                 ]);
 
+                // Ensure original prediction ID is maintained
+                if (isset($params['original_prediction_id'])) {
+                    $result['original_prediction_id'] = $params['original_prediction_id'];
+                }
+
+                // Create mapping file for webhook
+                $mappingFile = $this->config->getTempPath() . "mapping_{$result['id']}.json";
+                file_put_contents($mappingFile, json_encode([
+                    'original_prediction_id' => $params['original_prediction_id'] ?? null,
+                    'panel_prediction_id' => $result['id'],
+                    'cartoonified_images' => [$params['cartoonified_image']],
+                    'created_at' => date('c')
+                ]));
+
                 return $result;
             } else if (isset($params['character_image'])) {
                 // Start with cartoonification

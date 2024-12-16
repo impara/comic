@@ -28,54 +28,32 @@ class ComicGenerator
      * @param string|null $originalPredictionId Original prediction ID to update with final result
      * @return array Generated comic data
      */
-    public function generatePanel(array $characters, string $sceneDescription, ?string $originalPredictionId = null): array
+    public function generatePanel(array $characters, string $sceneDescription, ?string $originalPredictionId = null)
     {
-        // Generate a prediction ID if not provided
-        if (!$originalPredictionId) {
-            $originalPredictionId = uniqid('panel_', true);
-            $this->logger->error("TEST_LOG - Generated new prediction ID", [
-                'original_prediction_id' => $originalPredictionId
-            ]);
-        }
-
-        // Create state file immediately
-        $tempPath = $this->config->getTempPath();
-        $stateFile = $tempPath . "state_{$originalPredictionId}.json";
-        $initialState = [
-            'prediction_id' => $originalPredictionId,
-            'started_at' => time(),
-            'scene_description' => $sceneDescription,
+        $this->logger->info("Generating panel", [
             'character_count' => count($characters),
-            'cartoonification_requests' => [],
-            'status' => 'processing'
-        ];
-        file_put_contents($stateFile, json_encode($initialState));
-
-        // Test log to confirm code execution
-        $this->logger->error("TEST_LOG - generatePanel method started", [
-            'time' => date('Y-m-d H:i:s'),
-            'character_count' => count($characters),
-            'original_prediction_id' => $originalPredictionId,
-            'state_file' => basename($stateFile)
+            'scene_length' => strlen($sceneDescription),
+            'original_prediction_id' => $originalPredictionId
         ]);
 
         try {
-            // Process each custom character
+            // Create a unique ID for this panel if not provided
+            $panelId = $originalPredictionId ?: 'panel_' . uniqid('', true);
+
+            // Create state file for tracking
+            $stateFile = $this->config->getTempPath() . "state_{$panelId}.json";
+            file_put_contents($stateFile, json_encode([
+                'id' => $panelId,
+                'status' => 'initializing',
+                'started_at' => time(),
+                'cartoonification_requests' => []
+            ]));
+
+            $pendingCartoonifications = [];
             $processedCharacters = [];
             $characterImages = [];
-            $pendingCartoonifications = [];
 
             foreach ($characters as $character) {
-                $this->logger->info("Processing character", [
-                    'character_id' => $character['id'],
-                    'has_image' => isset($character['image'])
-                ]);
-
-                // Skip if no image provided
-                if (!isset($character['image'])) {
-                    continue;
-                }
-
                 // If character is already cartoonified, use it directly
                 if (isset($character['cartoonified_image'])) {
                     $processedCharacters[] = $character;
@@ -110,10 +88,10 @@ class ComicGenerator
                         $pendingCartoonifications[] = $cartoonificationResult['id'];
 
                         // Create pending file for webhook processing
-                        $pendingFile = $tempPath . "pending_{$cartoonificationResult['id']}.json";
+                        $pendingFile = $this->config->getTempPath() . "pending_{$cartoonificationResult['id']}.json";
                         file_put_contents($pendingFile, json_encode([
                             'prediction_id' => $cartoonificationResult['id'],
-                            'original_prediction_id' => $originalPredictionId,
+                            'original_prediction_id' => $panelId,
                             'character_id' => $character['id'],
                             'panel_data' => json_encode([
                                 'characters' => [$character],
@@ -122,6 +100,16 @@ class ComicGenerator
                             'state_file' => basename($stateFile),
                             'started_at' => time()
                         ]));
+
+                        // Update state file with pending cartoonification
+                        $state = json_decode(file_get_contents($stateFile), true);
+                        $state['cartoonification_requests'][] = [
+                            'prediction_id' => $cartoonificationResult['id'],
+                            'character_id' => $character['id'],
+                            'status' => 'pending',
+                            'started_at' => time()
+                        ];
+                        file_put_contents($stateFile, json_encode($state));
                     }
                 } catch (Exception $e) {
                     $this->logger->error("Failed to process character", [
@@ -132,43 +120,14 @@ class ComicGenerator
                 }
             }
 
-            // If we have pending cartoonifications, return early with pending status
-            if (!empty($pendingCartoonifications)) {
-                return [
-                    'id' => $originalPredictionId,
-                    'status' => 'processing',
-                    'pending_predictions' => $pendingCartoonifications
-                ];
-            }
-
-            // Now validate that all characters have cartoonified images
-            foreach ($processedCharacters as $character) {
-                if (!isset($character['cartoonified_image'])) {
-                    throw new Exception("Cannot generate panel: Missing cartoonified image for character " . ($character['id'] ?? 'unknown'));
-                }
-                $characterImages[] = $character['cartoonified_image'];
-            }
-
-            // Generate the final panel using SDXL with cartoonified images
-            $result = $this->replicateClient->generateImage([
-                'prompt' => $sceneDescription,
-                'cartoonified_image' => $characterImages[0], // Currently handling one character
-                'options' => [
-                    'style' => $characters[0]['options']['style'] ?? 'default'
-                ]
-            ]);
-
-            // Add original prediction ID to result
-            $result['original_prediction_id'] = $originalPredictionId;
-
-            // Update state file with completion
-            $state = json_decode(file_get_contents($stateFile), true);
-            $state['status'] = 'completed';
-            $state['completed_at'] = time();
-            $state['result'] = $result;
-            file_put_contents($stateFile, json_encode($state));
-
-            return $result;
+            // Return result with pending predictions if any
+            return [
+                'id' => $panelId,
+                'original_prediction_id' => $panelId,  // Always include original ID
+                'status' => count($pendingCartoonifications) > 0 ? 'pending' : 'processing',
+                'pending_predictions' => $pendingCartoonifications,
+                'state_file' => basename($stateFile)
+            ];
         } catch (Exception $e) {
             $this->logger->error("Failed to generate panel", [
                 'error' => $e->getMessage(),
