@@ -114,6 +114,16 @@ try {
                     'panel_data_type' => isset($pending['panel_data']) ? gettype($pending['panel_data']) : 'none'
                 ]);
 
+                // Store cartoonification result
+                $cartoonificationResult = [
+                    'id' => $predictionId,
+                    'status' => 'succeeded',
+                    'type' => 'cartoonification',
+                    'output' => is_array($data['output']) ? $data['output'][0] : $data['output'],
+                    'completed_at' => date('c')
+                ];
+                file_put_contents($tempPath . "{$predictionId}.json", json_encode($cartoonificationResult));
+
                 // If this is a cartoonification completion, trigger panel generation
                 if (isset($pending['panel_data'])) {
                     $panelData = json_decode($pending['panel_data'], true);
