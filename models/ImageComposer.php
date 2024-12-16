@@ -31,16 +31,13 @@ class ImageComposer
             throw new Exception("No images provided for panel composition");
         }
 
-        // Log incoming images array
-        $this->logger->info("Starting panel composition", [
-            'image_count' => count($images),
-            'scene_context' => $sceneContext,
-            'images' => array_map(function ($url, $index) {
+        // Log complete images array at start
+        $this->logger->info("Starting panel composition with images", [
+            'raw_images' => array_map(function ($url, $index) {
                 return [
                     'index' => $index,
                     'url' => $url,
-                    'is_replicate_url' => strpos($url, 'replicate.delivery') !== false,
-                    'is_base64' => strpos($url, 'data:image') === 0
+                    'type' => $this->determineImageType($url)
                 ];
             }, $images, array_keys($images))
         ]);
@@ -73,45 +70,34 @@ class ImageComposer
 
             // Process background first if it exists
             if (isset($images['background'])) {
-                $this->logger->info("Adding background image", [
-                    'image' => $images['background']
+                $this->logger->info("composePanel: Adding background image", [
+                    'image_url' => $images['background'],
+                    'type' => $this->determineImageType($images['background'])
                 ]);
                 $this->addImageToPanel($panel, $images['background'], 0, 0, $panelWidth, $panelHeight);
                 unset($images['background']);
             }
 
-            // Calculate positions for characters using force-directed algorithm
+            // Calculate positions for characters
             $positions = $this->calculateCharacterPositions($images, $sceneContext, $panelWidth, $panelHeight);
 
-            // Log positions before adding images
-            $this->logger->info("Calculated character positions", [
-                'positions' => array_map(function ($pos, $index) use ($images) {
-                    return [
-                        'index' => $index,
-                        'position' => $pos,
-                        'image_url' => $images[$index]
-                    ];
-                }, $positions, array_keys($positions))
-            ]);
-
             // Add character images
-            foreach ($images as $index => $imageData) {
+            foreach ($images as $index => $imageUrl) {
                 if (!isset($positions[$index])) continue;
 
                 $pos = $positions[$index];
 
-                $this->logger->info("Adding character image to panel", [
+                $this->logger->info("composePanel: Adding image at index", [
                     'index' => $index,
+                    'image_url' => $imageUrl,
                     'position' => $pos,
-                    'image_url' => $imageData,
-                    'is_replicate_url' => strpos($imageData, 'replicate.delivery') !== false,
-                    'is_base64' => strpos($imageData, 'data:image') === 0
+                    'type' => $this->determineImageType($imageUrl)
                 ]);
 
                 // Add the character image
                 $this->addImageToPanel(
                     $panel,
-                    $imageData,
+                    $imageUrl,
                     $pos['x'],
                     $pos['y'],
                     $pos['width'],
@@ -126,10 +112,7 @@ class ImageComposer
 
             $this->logger->info("Panel composition completed", [
                 'output_path' => $outputPath,
-                'panel_dimensions' => [
-                    'width' => $panelWidth,
-                    'height' => $panelHeight
-                ]
+                'total_images_processed' => count($images) + (isset($images['background']) ? 1 : 0)
             ]);
 
             return $outputPath;
@@ -140,6 +123,23 @@ class ImageComposer
             ]);
             throw $e;
         }
+    }
+
+    /**
+     * Determine the type of image from its data
+     */
+    private function determineImageType(string $imageData): string
+    {
+        if (strpos($imageData, 'replicate.delivery') !== false) {
+            return 'replicate_url';
+        } elseif (filter_var($imageData, FILTER_VALIDATE_URL)) {
+            return 'external_url';
+        } elseif (strpos($imageData, 'data:image') === 0) {
+            return 'base64';
+        } elseif (file_exists($imageData)) {
+            return 'local_file';
+        }
+        return 'unknown';
     }
 
     /**
@@ -155,11 +155,12 @@ class ImageComposer
     private function addImageToPanel(\GdImage $panel, string $imageData, int $x, int $y, int $width, int $height): void
     {
         try {
-            $this->logger->info("Adding image to panel", [
+            $imageType = $this->determineImageType($imageData);
+            $this->logger->info("addImageToPanel: Processing image", [
+                'type' => $imageType,
                 'position' => ['x' => $x, 'y' => $y],
                 'dimensions' => ['width' => $width, 'height' => $height],
-                'image_type' => strpos($imageData, 'data:image') === 0 ? 'base64' : (filter_var($imageData, FILTER_VALIDATE_URL) ? 'url' : 'file'),
-                'is_replicate_url' => strpos($imageData, 'replicate.delivery') !== false
+                'url_or_path' => $imageType === 'base64' ? 'base64_data' : $imageData
             ]);
 
             // Handle different image sources

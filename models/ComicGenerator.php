@@ -118,6 +118,48 @@ class ComicGenerator
                 'style' => $characters[0]['options']['style'] ?? 'modern'
             ];
 
+            // Log processed characters and character images before composition
+            $this->logger->info("Processed characters before panel composition", [
+                'processed_characters' => array_map(function ($char) {
+                    return [
+                        'id' => $char['id'] ?? 'unknown',
+                        'has_cartoonified' => isset($char['cartoonified_image']),
+                        'cartoonified_url' => $char['cartoonified_image'] ?? null,
+                        'original_url' => $char['image'] ?? null
+                    ];
+                }, $processedCharacters)
+            ]);
+
+            // Log detailed image usage for each character
+            foreach ($characters as $index => $character) {
+                if (isset($character['cartoonified_image'])) {
+                    $this->logger->info("Using cartoonified_image for character", [
+                        'character_id' => $character['id'] ?? 'unknown',
+                        'index' => $index,
+                        'cartoonified_image_url' => $character['cartoonified_image']
+                    ]);
+                } else {
+                    $this->logger->info("No cartoonified_image found, using original image", [
+                        'character_id' => $character['id'] ?? 'unknown',
+                        'index' => $index,
+                        'image_url' => $character['image'] ?? 'none'
+                    ]);
+                }
+            }
+
+            // Log final character images array that will be used in composition
+            $this->logger->info("Character images being sent to composePanel", [
+                'character_count' => count($characterImages),
+                'images' => array_map(function ($url, $index) use ($characters) {
+                    return [
+                        'index' => $index,
+                        'character_id' => $characters[$index]['id'] ?? 'unknown',
+                        'image_url' => $url,
+                        'is_cartoonified' => isset($characters[$index]['cartoonified_image'])
+                    ];
+                }, $characterImages, array_keys($characterImages))
+            ]);
+
             // Compose the panel using ImageComposer
             $imageComposer = new ImageComposer($this->logger);
             $composedPanelPath = $imageComposer->composePanel($characterImages, $sceneContext);
