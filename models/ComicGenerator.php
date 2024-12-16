@@ -50,6 +50,10 @@ class ComicGenerator
                 if (isset($character['cartoonified_image'])) {
                     $processedCharacters[] = $character;
                     $characterImages[$index] = $character['cartoonified_image'];
+                    $this->logger->info("Using existing cartoonified image", [
+                        'character_index' => $index,
+                        'cartoonified_url' => $character['cartoonified_image']
+                    ]);
                     continue;
                 }
 
@@ -60,9 +64,17 @@ class ComicGenerator
                 // If character has a prediction_id, it means cartoonification is pending
                 if (isset($processedCharacter['prediction_id'])) {
                     $pendingCartoonifications[] = $processedCharacter['prediction_id'];
+                    $this->logger->info("Cartoonification pending", [
+                        'character_index' => $index,
+                        'prediction_id' => $processedCharacter['prediction_id']
+                    ]);
                 } else {
                     // Use cartoonified image for composition
                     $characterImages[$index] = $processedCharacter['cartoonified_image'];
+                    $this->logger->info("Using newly processed cartoonified image", [
+                        'character_index' => $index,
+                        'cartoonified_url' => $processedCharacter['cartoonified_image']
+                    ]);
                 }
             }
 

@@ -102,9 +102,27 @@ try {
                         throw new Exception("Invalid panel_data format");
                     }
 
-                    // Update the character with cartoonified image
-                    $panelData['characters'][0]['cartoonified_image'] = is_array($data['output']) ? $data['output'][0] : $data['output'];
-                    $panelData['characters'][0]['image'] = is_array($data['output']) ? $data['output'][0] : $data['output'];
+                    // Find the correct character index by matching prediction ID
+                    $characterIndex = -1;
+                    foreach ($panelData['characters'] as $index => $character) {
+                        if (isset($character['prediction_id']) && $character['prediction_id'] === $predictionId) {
+                            $characterIndex = $index;
+                            break;
+                        }
+                    }
+
+                    if ($characterIndex === -1) {
+                        $logger->error("Could not find character with prediction ID", [
+                            'prediction_id' => $predictionId,
+                            'characters' => $panelData['characters']
+                        ]);
+                        throw new Exception("Character not found for prediction ID: $predictionId");
+                    }
+
+                    // Update the specific character with cartoonified image
+                    $cartoonifiedUrl = is_array($data['output']) ? $data['output'][0] : $data['output'];
+                    $panelData['characters'][$characterIndex]['cartoonified_image'] = $cartoonifiedUrl;
+                    $panelData['characters'][$characterIndex]['image'] = $cartoonifiedUrl;
 
                     // Create a new ComicGenerator instance
                     require_once __DIR__ . '/models/ComicGenerator.php';
