@@ -116,15 +116,38 @@ try {
             'pending_prediction_id' => $pending['prediction_id'] ?? 'none',
             'matches_current' => ($pending['prediction_id'] ?? '') === $predictionId,
             'has_panel_data' => isset($pending['panel_data']),
+            'has_state_file' => isset($pending['state_file']),
             'raw_pending' => $pending
         ]);
+
         if ($pending && isset($pending['prediction_id']) && $pending['prediction_id'] === $predictionId) {
             $logger->error("TEST_LOG - Found matching cartoonification", [
                 'pending_file' => basename($pendingFile),
                 'prediction_id' => $predictionId,
                 'has_panel_data' => isset($pending['panel_data']),
-                'raw_pending' => $pending
+                'state_file' => $pending['state_file'] ?? null
             ]);
+
+            // Update state file if it exists
+            if (isset($pending['state_file'])) {
+                $stateFile = $tempPath . $pending['state_file'];
+                if (file_exists($stateFile)) {
+                    $state = json_decode(file_get_contents($stateFile), true) ?? [];
+                    foreach ($state['cartoonification_requests'] ?? [] as &$request) {
+                        if ($request['prediction_id'] === $predictionId) {
+                            $request['status'] = $data['status'];
+                            $request['completed_at'] = time();
+                            if ($data['status'] === 'succeeded') {
+                                $request['output'] = is_array($data['output']) ? $data['output'][0] : $data['output'];
+                            } elseif ($data['status'] === 'failed') {
+                                $request['error'] = $data['error'] ?? 'Unknown error';
+                            }
+                            break;
+                        }
+                    }
+                    file_put_contents($stateFile, json_encode($state));
+                }
+            }
 
             // Store the result directly
             if ($data['status'] === 'succeeded' && !empty($data['output'])) {

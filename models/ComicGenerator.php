@@ -81,13 +81,28 @@ class ComicGenerator
                     $tempPath = $this->config->getTempPath();
                     $pendingFile = $tempPath . "pending_{$cartoonificationResult['prediction_id']}.json";
 
+                    // Create state tracking file
+                    $stateFile = $tempPath . "state_{$originalPredictionId}.json";
+                    $currentState = [];
+                    if (file_exists($stateFile)) {
+                        $currentState = json_decode(file_get_contents($stateFile), true) ?? [];
+                    }
+                    $currentState['cartoonification_requests'][] = [
+                        'prediction_id' => $cartoonificationResult['prediction_id'],
+                        'character_id' => $character['id'],
+                        'started_at' => time(),
+                        'status' => 'pending'
+                    ];
+                    file_put_contents($stateFile, json_encode($currentState));
+
                     file_put_contents($pendingFile, json_encode([
                         'prediction_id' => $cartoonificationResult['prediction_id'],
                         'original_image' => $character['image'],
                         'character_data' => $character,
                         'panel_data' => json_encode($panelData),
                         'original_prediction_id' => $originalPredictionId,
-                        'started_at' => time()
+                        'started_at' => time(),
+                        'state_file' => basename($stateFile)
                     ]));
 
                     $pendingCartoonifications[] = $cartoonificationResult['prediction_id'];
@@ -95,7 +110,8 @@ class ComicGenerator
                     $this->logger->error("TEST_LOG - Started cartoonification process", [
                         'character_id' => $character['id'],
                         'prediction_id' => $cartoonificationResult['prediction_id'],
-                        'pending_file' => basename($pendingFile)
+                        'pending_file' => basename($pendingFile),
+                        'state_file' => basename($stateFile)
                     ]);
                 }
 
