@@ -110,6 +110,14 @@ class CharacterProcessor
                 'started_at' => time()
             ];
 
+            $this->logger->error("TEST_LOG - Starting cartoonification", [
+                'character_id' => $character['id'],
+                'prediction_id' => $predictionId,
+                'has_scene_description' => isset($character['scene_description']),
+                'scene_description' => $character['scene_description'] ?? 'none',
+                'style' => $character['options']['style'] ?? 'default'
+            ]);
+
             $this->logger->error("TEST_LOG - Creating pending file", [
                 'file' => basename($pendingFile),
                 'prediction_id' => $predictionId,
@@ -119,6 +127,19 @@ class CharacterProcessor
             ]);
 
             file_put_contents($pendingFile, json_encode($pendingData));
+
+            // Verify the pending file was created and contains correct data
+            if (file_exists($pendingFile)) {
+                $writtenData = json_decode(file_get_contents($pendingFile), true);
+                $this->logger->error("TEST_LOG - Verified pending file", [
+                    'file' => basename($pendingFile),
+                    'exists' => true,
+                    'has_prediction_id' => isset($writtenData['prediction_id']),
+                    'prediction_matches' => ($writtenData['prediction_id'] ?? '') === $predictionId,
+                    'has_panel_data' => isset($writtenData['panel_data']),
+                    'panel_data_decoded' => json_decode($writtenData['panel_data'] ?? '{}', true)
+                ]);
+            }
 
             // Return immediately with the prediction ID
             return array_merge($character, [

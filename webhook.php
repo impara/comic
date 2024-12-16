@@ -124,6 +124,15 @@ try {
 
                     // Update cartoonified_image for the character(s)
                     $cartoonifiedUrl = is_array($data['output']) ? $data['output'][0] : $data['output'];
+
+                    // Log the original panel data before update
+                    $logger->error("TEST_LOG - Panel data before cartoonified update", [
+                        'character_id' => $panelData['characters'][0]['id'],
+                        'has_cartoonified' => isset($panelData['characters'][0]['cartoonified_image']),
+                        'original_image' => $panelData['characters'][0]['image'],
+                        'scene_description' => $panelData['scene_description']
+                    ]);
+
                     $panelData['characters'][0]['cartoonified_image'] = $cartoonifiedUrl;
 
                     // Log the updated panel data before generating panel
@@ -131,7 +140,8 @@ try {
                         'character_id' => $panelData['characters'][0]['id'],
                         'cartoonified_url' => $cartoonifiedUrl,
                         'scene_description' => $panelData['scene_description'],
-                        'full_panel_data' => $panelData
+                        'full_panel_data' => $panelData,
+                        'original_pending_file' => basename($pendingFile)
                     ]);
 
                     // Now call generatePanel() with updated panelData
@@ -144,9 +154,12 @@ try {
                             'id' => $panelData['characters'][0]['id'] ?? 'unknown',
                             'has_cartoonified' => isset($panelData['characters'][0]['cartoonified_image']),
                             'cartoonified_url' => $panelData['characters'][0]['cartoonified_image'] ?? null,
+                            'original_image' => $panelData['characters'][0]['image'],
                             'is_replicate_url' => isset($panelData['characters'][0]['cartoonified_image']) &&
                                 strpos($panelData['characters'][0]['cartoonified_image'], 'replicate.delivery') !== false
-                        ]
+                        ],
+                        'pending_file' => basename($pendingFile),
+                        'prediction_id' => $predictionId
                     ]);
 
                     $panelResult = $comicGenerator->generatePanel(
