@@ -30,10 +30,22 @@ class ComicGenerator
      */
     public function generatePanel(array $characters, string $sceneDescription, ?string $originalPredictionId = null): array
     {
-        $this->logger->info("Starting comic panel generation", [
+        // Test log to confirm code execution
+        $this->logger->error("TEST_LOG - generatePanel method started", [
+            'time' => date('Y-m-d H:i:s'),
+            'character_count' => count($characters)
+        ]);
+
+        // Unconditional logging of input parameters
+        $this->logger->error("TEST_LOG - Input parameters", [
             'character_count' => count($characters),
             'description_length' => strlen($sceneDescription),
-            'original_prediction_id' => $originalPredictionId
+            'original_prediction_id' => $originalPredictionId,
+            'first_character' => isset($characters[0]) ? [
+                'id' => $characters[0]['id'] ?? 'unknown',
+                'has_image' => isset($characters[0]['image']),
+                'has_cartoonified' => isset($characters[0]['cartoonified_image'])
+            ] : null
         ]);
 
         try {
@@ -42,39 +54,42 @@ class ComicGenerator
             $characterImages = [];
             $pendingCartoonifications = [];
 
-            // Log initial state of all characters
-            $this->logger->info("DEBUG_VERIFY - Initial character state", [
+            // Unconditional logging of initial character state
+            $this->logger->error("TEST_LOG - Raw character data", [
                 'characters' => array_map(function ($char) {
                     return [
                         'id' => $char['id'] ?? 'unknown',
                         'has_image' => isset($char['image']),
                         'has_cartoonified' => isset($char['cartoonified_image']),
                         'image_url' => $char['image'] ?? null,
-                        'cartoonified_url' => $char['cartoonified_image'] ?? null
+                        'cartoonified_url' => $char['cartoonified_image'] ?? null,
+                        'all_keys' => array_keys($char)
                     ];
                 }, $characters)
             ]);
 
             foreach ($characters as $index => $character) {
+                // Log every character being processed
+                $this->logger->error("TEST_LOG - Processing character", [
+                    'index' => $index,
+                    'character' => [
+                        'id' => $character['id'] ?? 'unknown',
+                        'has_image' => isset($character['image']),
+                        'has_cartoonified' => isset($character['cartoonified_image']),
+                        'image_url' => $character['image'] ?? null,
+                        'cartoonified_url' => $character['cartoonified_image'] ?? null
+                    ]
+                ]);
+
                 if (!isset($character['image']) && !isset($character['cartoonified_image'])) {
                     throw new Exception("Character image is required");
                 }
-
-                // Always log the character being processed
-                $this->logger->info("DEBUG_VERIFY - Processing character", [
-                    'index' => $index,
-                    'id' => $character['id'] ?? 'unknown',
-                    'has_image' => isset($character['image']),
-                    'has_cartoonified' => isset($character['cartoonified_image']),
-                    'image_url' => $character['image'] ?? null,
-                    'cartoonified_url' => $character['cartoonified_image'] ?? null
-                ]);
 
                 // If character already has a cartoonified image, use it directly
                 if (isset($character['cartoonified_image'])) {
                     $processedCharacters[] = $character;
                     $characterImages[$index] = $character['cartoonified_image'];
-                    $this->logger->info("DEBUG_VERIFY - Using cartoonified image", [
+                    $this->logger->error("TEST_LOG - Using existing cartoonified image", [
                         'index' => $index,
                         'id' => $character['id'] ?? 'unknown',
                         'cartoonified_url' => $character['cartoonified_image']
@@ -86,8 +101,8 @@ class ComicGenerator
                 $processedCharacter = $this->characterProcessor->processCharacter($character);
                 $processedCharacters[] = $processedCharacter;
 
-                // Always log the processed character result
-                $this->logger->info("DEBUG_VERIFY - Character processed", [
+                // Log processed character result
+                $this->logger->error("TEST_LOG - Character processed", [
                     'index' => $index,
                     'id' => $processedCharacter['id'] ?? 'unknown',
                     'has_prediction_id' => isset($processedCharacter['prediction_id']),
@@ -102,6 +117,19 @@ class ComicGenerator
                     $characterImages[$index] = $processedCharacter['cartoonified_image'];
                 }
             }
+
+            // Log arrays before composition
+            $this->logger->error("TEST_LOG - Arrays before composition", [
+                'processed_characters' => array_map(function ($char) {
+                    return [
+                        'id' => $char['id'] ?? 'unknown',
+                        'has_cartoonified' => isset($char['cartoonified_image']),
+                        'cartoonified_url' => $char['cartoonified_image'] ?? null
+                    ];
+                }, $processedCharacters),
+                'character_images' => $characterImages,
+                'pending_cartoonifications' => $pendingCartoonifications
+            ]);
 
             // Log the final arrays before composition
             $this->logger->info("DEBUG_VERIFY - Final arrays before composition", [
