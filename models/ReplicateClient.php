@@ -157,78 +157,121 @@ class ReplicateClient
             // Get the webhook URL from config
             $webhookUrl = $this->config->getBaseUrl() . '/webhook.php';
 
-            // If we have a composed panel, convert it to a URL
-            if (isset($params['composed_panel']) && file_exists($params['composed_panel'])) {
-                $publicPath = str_replace($this->config->getOutputPath(), '', $params['composed_panel']);
-                $baseUrl = $this->config->getBaseUrl();
-                $params['composed_panel'] = rtrim($baseUrl, '/') . '/public/generated/' . ltrim($publicPath, '/');
+            // If we have a cartoonified image, prepare it for processing
+            if (isset($params['cartoonified_image'])) {
+                if (file_exists($params['cartoonified_image'])) {
+                    $publicPath = str_replace($this->config->getOutputPath(), '', $params['cartoonified_image']);
+                    $baseUrl = $this->config->getBaseUrl();
+                    $params['cartoonified_image'] = rtrim($baseUrl, '/') . '/public/generated/' . ltrim($publicPath, '/');
 
-                $this->logger->info("Converted composed panel path to URL", [
-                    'original_path' => $params['composed_panel'],
-                    'public_url' => $params['composed_panel']
-                ]);
+                    $this->logger->info("Converted cartoonified image path to URL", [
+                        'original_path' => $params['cartoonified_image'],
+                        'public_url' => $params['cartoonified_image']
+                    ]);
+                }
             }
 
-            // Build enhanced prompt with style, background, and story context
+            // Build enhanced prompt with style and context
             $style = $params['options']['style'] ?? 'modern';
             $basePrompt = $params['prompt'] ?? '';
 
-            // Style-specific prompt enhancements
+            // Style-specific prompt enhancements with stronger pose emphasis
             $stylePrompts = [
-                'manga' => 'high-quality manga art style, detailed manga shading, dynamic manga composition',
-                'comic' => 'professional comic book art style, vibrant colors, dynamic comic book composition',
-                'european' => 'European comic art style, ligne claire, detailed backgrounds, clear lines',
-                'modern' => 'modern digital art style, high detail, professional illustration'
+                'manga' => 'manga style, detailed manga shading, action scene',
+                'comic' => 'comic book style, vibrant colors, action scene',
+                'european' => 'European comic style, clear lines, action scene',
+                'modern' => 'modern digital art style, action scene'
             ];
 
-            // Build the final prompt
-            $enhancedPrompt = "Create a {$style} comic panel: {$basePrompt}. ";
-            $enhancedPrompt .= $stylePrompts[$style] ?? $stylePrompts['modern'];
-
-            if (isset($params['composed_panel'])) {
-                $enhancedPrompt .= " Use the provided character composition as reference for character placement and poses.";
+            // Extract action keywords from the base prompt for better pose emphasis
+            $actionKeywords = '';
+            if (preg_match('/\b(running|jumping|fighting|flying|walking|dancing)\b/i', $basePrompt, $matches)) {
+                $actionKeywords = $matches[0];
+                // Enhance action description based on the type
+                $actionEnhancements = [
+                    'running' => 'running pose, dynamic action',
+                    'jumping' => 'jumping pose, dynamic action',
+                    'fighting' => 'fighting pose, dynamic action',
+                    'flying' => 'flying pose, dynamic action',
+                    'walking' => 'walking pose, dynamic action',
+                    'dancing' => 'dancing pose, dynamic action'
+                ];
+                $actionKeywords = $actionEnhancements[strtolower($matches[0])] ?? "$matches[0] pose, dynamic action";
             }
 
-            // Add background context if available
-            if (isset($params['background'])) {
-                $enhancedPrompt .= " Set in {$params['background']}.";
-            }
+            // Action-specific negative prompts
+            $actionNegativePrompts = array_merge(
+                $this->config->getNegativePrompts(),
+                ['static pose', 'standing still', 'stiff', 'rigid']
+            );
 
-            // Update parameters with enhanced prompt and style-specific settings
+            // Build the final prompt with stronger emphasis on action
+            $enhancedPrompt = trim($actionKeywords . ", " . ($stylePrompts[$style] ?? $stylePrompts['modern']));
+
+            // Build the secondary prompt focusing purely on action
+            $actionPrompt = $actionKeywords ? "$actionKeywords, dynamic movement" : "";
+
+            // Prepare SDXL parameters according to version 39ed52f2
             $modelParams = [
                 'prompt' => $enhancedPrompt,
-                'negative_prompt' => implode(', ', $this->config->getNegativePrompts()),
-                'steps' => 30,
+                'negative_prompt' => implode(', ', $actionNegativePrompts),
+                'num_inference_steps' => 75,
+                'guidance_scale' => 15.0,
                 'width' => 1024,
                 'height' => 1024,
-                'cfg_scale' => 7.5,
-                'init_image' => $params['composed_panel'] ?? null,
-                'prompt_strength' => isset($params['composed_panel']) ? 0.7 : 1.0,
-                'cartoonified_images' => $params['cartoonified_images'] ?? []  // Add cartoonified images
+                'scheduler' => "DDIM"
             ];
 
-            // Log the final parameters
-            $this->logger->info("Final model parameters", [
-                'prompt' => $enhancedPrompt,
-                'style' => $style,
-                'has_composition' => isset($params['composed_panel']),
-                'cartoonified_images_count' => count($params['cartoonified_images'] ?? [])
-            ]);
+            // Handle image processing based on input type
+            if (isset($params['cartoonified_image'])) {
+                // Use already cartoonified image for SDXL
+                $modelParams['image'] = $params['cartoonified_image'];
+                $modelParams['strength'] = 0.45;
+                $modelParams['high_noise_frac'] = 0.9;
 
-            // Make the API call
-            $result = $this->httpClient->post('https://api.replicate.com/v1/predictions', [
-                'version' => $this->config->get('replicate.models.txt2img.version'),
-                'input' => $modelParams,
-                'webhook' => $webhookUrl,
-                'webhook_events_filter' => ['completed']  // Only receive webhook when prediction is complete
-            ]);
+                if ($actionPrompt) {
+                    $modelParams['prompt_2'] = $actionPrompt;
+                    $modelParams['guidance_scale_2'] = 12.0;
+                }
 
-            $this->logger->info("Image generation initiated", [
-                'result' => $result,
-                'webhook_url' => $webhookUrl
-            ]);
+                // Make the SDXL API call
+                $result = $this->httpClient->post('https://api.replicate.com/v1/predictions', [
+                    'version' => $this->config->get('replicate.models.sdxl.version'),
+                    'input' => $modelParams,
+                    'webhook' => $webhookUrl,
+                    'webhook_events_filter' => ['completed']
+                ]);
 
-            return $result;
+                return $result;
+            } else if (isset($params['character_image'])) {
+                // Start with cartoonification
+                $cartoonifyResult = $this->cartoonify($params['character_image']);
+
+                // Create a pending file for webhook to handle SDXL stage
+                if (!isset($cartoonifyResult['output'])) {
+                    $tempPath = $this->config->getTempPath();
+                    $pendingFile = $tempPath . "pending_{$cartoonifyResult['id']}.json";
+
+                    file_put_contents($pendingFile, json_encode([
+                        'prediction_id' => $cartoonifyResult['id'],
+                        'stage' => 'cartoonify',
+                        'next_stage' => 'sdxl',
+                        'sdxl_params' => [
+                            'prompt' => $enhancedPrompt,
+                            'action_prompt' => $actionPrompt,
+                            'style' => $style,
+                            'model_params' => $modelParams
+                        ],
+                        'original_prediction_id' => $params['original_prediction_id'] ?? null,
+                        'started_at' => time()
+                    ]));
+                }
+
+                return $cartoonifyResult;
+            }
+
+            // If no image provided, throw error
+            throw new Exception("No image provided for processing");
         } catch (Exception $e) {
             $this->logger->error("Failed to generate image", [
                 'error' => $e->getMessage(),

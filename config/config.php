@@ -23,6 +23,22 @@ return [
         'api_token' => getenv('REPLICATE_API_TOKEN'),
         'webhook_secret' => getenv('REPLICATE_WEBHOOK_SECRET'),
         'models' => [
+            'sdxl' => [
+                'version' => '39ed52f2a78e934b3ba6e2a89f5b1c712de7dfea535525255b1aa35c5565e08b',
+                'params' => [
+                    'prompt' => null,
+                    'negative_prompt' => null,
+                    'num_inference_steps' => 75,
+                    'guidance_scale' => 15.0,
+                    'width' => 1024,
+                    'height' => 1024,
+                    'strength' => 0.45,
+                    'high_noise_frac' => 0.9,
+                    'prompt_2' => null,
+                    'guidance_scale_2' => 12.0,
+                    'scheduler' => "DDIM"
+                ]
+            ],
             'txt2img' => [
                 'version' => '7762fd07cf82c948538e41f63f77d685e02b063e37e496e96eefd46c929f9bdc',
                 'params' => [

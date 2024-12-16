@@ -397,6 +397,65 @@ try {
         }
     }
 
+    // Handle the webhook payload
+    if ($data['status'] === 'succeeded') {
+        // Get the pending file
+        $pendingFile = $tempPath . "pending_{$data['id']}.json";
+        if (file_exists($pendingFile)) {
+            $pending = json_decode(file_get_contents($pendingFile), true);
+
+            // Check which stage we're in
+            if ($pending['stage'] === 'cartoonify' && $pending['next_stage'] === 'sdxl') {
+                // Cartoonification completed, now start SDXL
+                $cartoonifiedUrl = is_array($data['output']) ? $data['output'][0] : $data['output'];
+
+                // Get the stored SDXL parameters
+                $sdxlParams = $pending['sdxl_params'];
+                $sdxlParams['model_params']['image'] = $cartoonifiedUrl;
+
+                // Start SDXL processing
+                require_once __DIR__ . '/models/ReplicateClient.php';
+                $replicateClient = new ReplicateClient($logger);
+
+                $result = $replicateClient->generateImage([
+                    'cartoonified_image' => $cartoonifiedUrl,
+                    'prompt' => $sdxlParams['prompt'],
+                    'options' => ['style' => $sdxlParams['style']],
+                    'original_prediction_id' => $pending['original_prediction_id']
+                ]);
+
+                // Create new pending file for SDXL stage
+                $newPendingFile = $tempPath . "pending_{$result['id']}.json";
+                file_put_contents($newPendingFile, json_encode([
+                    'prediction_id' => $result['id'],
+                    'stage' => 'sdxl',
+                    'original_prediction_id' => $pending['original_prediction_id'],
+                    'cartoonified_url' => $cartoonifiedUrl,
+                    'started_at' => time()
+                ]));
+
+                // Clean up old pending file
+                @unlink($pendingFile);
+            } else if ($pending['stage'] === 'sdxl') {
+                // SDXL completed, this is our final result
+                $finalResult = [
+                    'id' => $pending['original_prediction_id'],
+                    'status' => 'succeeded',
+                    'output' => is_array($data['output']) ? $data['output'][0] : $data['output'],
+                    'completed_at' => date('c'),
+                    'cartoonified_url' => $pending['cartoonified_url']
+                ];
+
+                // Write final result
+                $resultFile = $tempPath . "{$pending['original_prediction_id']}.json";
+                file_put_contents($resultFile, json_encode($finalResult));
+
+                // Clean up pending file
+                @unlink($pendingFile);
+            }
+        }
+    }
+
     // If we get here, this is an unknown prediction - store it as-is
     $writeResult = file_put_contents($tempFile, $payload);
     if ($writeResult === false) {
