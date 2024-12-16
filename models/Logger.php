@@ -128,6 +128,16 @@ class Logger implements LoggerInterface
 
     private function shouldLog(string $level): bool
     {
+        // During testing/debugging, we want to see all logs
+        if (strpos($level, 'TEST_LOG') !== false || strpos($level, 'DEBUG_VERIFY') !== false) {
+            return true;
+        }
+
+        // Always log errors
+        if ($level === 'ERROR') {
+            return true;
+        }
+
         $configLevel = Config::getInstance()->getLogLevel();
         $logLevels = [
             'DEBUG' => 0,
@@ -136,9 +146,12 @@ class Logger implements LoggerInterface
             'ERROR' => 3
         ];
 
-        return isset($logLevels[$level]) &&
-            isset($logLevels[$configLevel]) &&
-            $logLevels[$level] >= $logLevels[$configLevel];
+        // If level isn't recognized, allow it through (better to log than not)
+        if (!isset($logLevels[$level])) {
+            return true;
+        }
+
+        return isset($logLevels[$configLevel]) && $logLevels[$level] >= $logLevels[$configLevel];
     }
 
     private function writeLog(string $level, string $message, array $context): void
@@ -169,17 +182,16 @@ class Logger implements LoggerInterface
 
     private function log(string $level, string $message, array $context): void
     {
-        // Skip debug logs if not in debug mode
-        if ($level === 'DEBUG' && !Config::getInstance()->isDebugMode()) {
+        // Always log test messages and error messages
+        if (strpos($message, 'TEST_LOG') === 0 || strpos($message, 'DEBUG_VERIFY') === 0 || $level === 'ERROR') {
+            $this->writeLog($level, $message, $context);
             return;
         }
 
-        // Rate limit similar messages
-        if (!$this->shouldLog($level)) {
-            return;
+        // For other messages, check the log level
+        if ($this->shouldLog($level)) {
+            $this->writeLog($level, $message, $context);
         }
-
-        $this->writeLog($level, $message, $context);
     }
 
     private function rotateLogIfNeeded(): void
