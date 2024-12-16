@@ -15,19 +15,25 @@ export const ComicGenerator = {
 
             // Initialize cartoonification state with original panel ID
             if (response.result.pending_predictions) {
+                const originalPanelId = response.result.original_prediction_id || response.result.id;
+                console.log('Setting up cartoonification tracking with original panel ID:', originalPanelId);
+
                 response.result.pending_predictions.forEach(predId => {
                     this.cartoonificationState.set(predId, {
                         status: 'pending',
                         started_at: new Date().getTime(),
-                        original_prediction_id: response.result.id
+                        original_prediction_id: originalPanelId
                     });
                 });
+
+                // Also store the original panel ID separately
+                this.originalPanelId = originalPanelId;
             }
 
             // Update UI to show progress
             $('#debugInfo').html(`
                 <p>Generation started successfully</p>
-                <p>Prediction ID: ${response.result.id}</p>
+                <p>Panel ID: ${response.result.original_prediction_id || response.result.id}</p>
                 <p>Status: ${response.result.status}</p>
                 ${response.result.pending_predictions ?
                     `<p>Waiting for cartoonification: ${response.result.pending_predictions.join(', ')}</p>` : ''}
@@ -36,8 +42,8 @@ export const ComicGenerator = {
             // Update progress bar
             $('.progress-bar').css('width', '25%');
 
-            // Start checking for results
-            this.checkResult(response.result.id);
+            // Start checking for results - use original panel ID if available
+            this.checkResult(response.result.original_prediction_id || response.result.id);
         } else {
             console.error('Comic generation returned error:', response.message);
             this.handleGenerationError(response.message);
@@ -272,7 +278,8 @@ export const ComicGenerator = {
                                 if (!this.cartoonificationState.has(predId)) {
                                     this.cartoonificationState.set(predId, {
                                         status: 'pending',
-                                        started_at: new Date().getTime()
+                                        started_at: new Date().getTime(),
+                                        original_prediction_id: predictionId
                                     });
                                     setTimeout(() => this.checkResult(predId), 5000);
                                 }
@@ -311,8 +318,16 @@ export const ComicGenerator = {
                         });
 
                         // Continue polling the original prediction
-                        if (result.original_prediction_id) {
-                            setTimeout(() => this.checkResult(result.original_prediction_id), 5000);
+                        const originalId = result.original_prediction_id || this.originalPanelId ||
+                            Array.from(this.cartoonificationState.entries())
+                                .find(([id, state]) => state.original_prediction_id)?.[1]?.original_prediction_id;
+
+                        if (originalId) {
+                            console.log('Continuing to poll original panel:', originalId);
+                            setTimeout(() => this.checkResult(originalId), 5000);
+                        } else {
+                            console.error('Could not find original panel ID to continue polling');
+                            this.handleGenerationError('Lost track of panel generation. Please try again.');
                         }
                     }
                 } else if (result.status === 'failed') {

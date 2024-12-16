@@ -193,7 +193,7 @@ class ComicGenerator
 
         // Prepare scene context
         $sceneContext = [
-            'style' => $characters[0]['options']['style'] ?? 'modern'
+            'style' => $characters[0]['options']['style'] ?? 'default'
         ];
 
         // Log arrays before composition
@@ -253,6 +253,9 @@ class ComicGenerator
             ],
             'cartoonified_images' => $validCartoonifiedImages
         ]);
+
+        // Add original prediction ID to result
+        $result['original_prediction_id'] = $originalPredictionId;
 
         // If we have an original prediction ID, store the final result
         if ($originalPredictionId && isset($result['id'])) {
