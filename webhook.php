@@ -77,6 +77,26 @@ try {
 
     // Check if this is a cartoonification completion
     $pendingFiles = glob($tempPath . "pending_*.json");
+
+    // Clean up stale pending files (older than 1 hour)
+    foreach ($pendingFiles as $pendingFile) {
+        $pending = json_decode(file_get_contents($pendingFile), true);
+        if ($pending && isset($pending['started_at'])) {
+            $age = time() - $pending['started_at'];
+            if ($age > 3600) { // 1 hour
+                $logger->error("TEST_LOG - Removing stale pending file", [
+                    'file' => basename($pendingFile),
+                    'age_seconds' => $age,
+                    'started_at' => $pending['started_at']
+                ]);
+                @unlink($pendingFile);
+                continue;
+            }
+        }
+    }
+
+    // Refresh pending files list after cleanup
+    $pendingFiles = glob($tempPath . "pending_*.json");
     $logger->error("TEST_LOG - Searching pending files", [
         'found_files' => count($pendingFiles),
         'prediction_id' => $predictionId,
