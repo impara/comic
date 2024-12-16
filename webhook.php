@@ -288,6 +288,17 @@ try {
             if ($data['status'] === 'succeeded' && !empty($data['output'])) {
                 // Write the final result to the original prediction file
                 $originalResultFile = $tempPath . "{$mapping['original_prediction_id']}.json";
+
+                // Get cartoonified images from mapping
+                $cartoonifiedImages = $mapping['cartoonified_images'] ?? [];
+
+                $logger->error("TEST_LOG - Verifying cartoonified image usage", [
+                    'panel_id' => $predictionId,
+                    'cartoonified_images' => $cartoonifiedImages,
+                    'has_output' => !empty($data['output']),
+                    'output_type' => is_array($data['output']) ? 'array' : 'string'
+                ]);
+
                 file_put_contents($originalResultFile, json_encode([
                     'id' => $mapping['original_prediction_id'],
                     'status' => 'succeeded',
@@ -295,7 +306,7 @@ try {
                     'type' => 'panel',
                     'completed_at' => date('c'),
                     'debug_info' => [
-                        'used_cartoonified_image' => $data['cartoonified_image'] ?? null,
+                        'used_cartoonified_images' => $cartoonifiedImages,
                         'panel_id' => $predictionId,
                         'original_id' => $mapping['original_prediction_id']
                     ]
@@ -305,7 +316,7 @@ try {
                     'original_file' => $originalResultFile,
                     'panel_output' => $data['output'],
                     'debug_info' => [
-                        'used_cartoonified_image' => $data['cartoonified_image'] ?? null
+                        'used_cartoonified_images' => $cartoonifiedImages
                     ]
                 ]);
 
