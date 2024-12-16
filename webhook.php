@@ -262,7 +262,7 @@ try {
                         file_put_contents($mappingFile, json_encode([
                             'original_prediction_id' => $pending['original_prediction_id'],
                             'panel_prediction_id' => $panelResult['id'],
-                            'cartoonified_image' => $cartoonifiedUrl,
+                            'cartoonified_images' => [$cartoonifiedUrl],
                             'created_at' => date('c')
                         ]));
                     }
@@ -333,9 +333,10 @@ try {
                 file_put_contents($originalResultFile, json_encode([
                     'id' => $mapping['original_prediction_id'],
                     'status' => 'succeeded',
-                    'output' => is_array($data['output']) ? $data['output'][0] : $data['output'],
                     'type' => 'panel',
+                    'output' => is_array($data['output']) ? $data['output'][0] : $data['output'],
                     'completed_at' => date('c'),
+                    'cartoonified_images' => $validCartoonifiedImages,
                     'debug_info' => [
                         'used_cartoonified_images' => $validCartoonifiedImages,
                         'panel_id' => $predictionId,
