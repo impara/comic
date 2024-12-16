@@ -164,8 +164,21 @@ try {
                     'type' => 'cartoonification',
                     'output' => is_array($data['output']) ? $data['output'][0] : $data['output'],
                     'completed_at' => date('c'),
-                    'original_prediction_id' => $pending['original_prediction_id'] ?? null
+                    'original_prediction_id' => $pending['original_prediction_id'] ?? null,
+                    'debug_info' => [
+                        'pending_file' => basename($pendingFile),
+                        'has_panel_data' => isset($pending['panel_data']),
+                        'original_prediction_id' => $pending['original_prediction_id'] ?? null
+                    ]
                 ];
+
+                $logger->error("TEST_LOG - Writing cartoonification result", [
+                    'prediction_id' => $predictionId,
+                    'original_prediction_id' => $pending['original_prediction_id'] ?? null,
+                    'has_panel_data' => isset($pending['panel_data']),
+                    'output_url' => is_array($data['output']) ? $data['output'][0] : $data['output']
+                ]);
+
                 file_put_contents($tempPath . "{$predictionId}.json", json_encode($cartoonificationResult));
 
                 // If this is a cartoonification completion, trigger panel generation

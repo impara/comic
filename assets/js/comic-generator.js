@@ -5,12 +5,24 @@ export const ComicGenerator = {
         // Get base path from current page location
         this.basePath = new URL('.', window.location.href).pathname;
         this.pollingInterval = null;
+        this.cartoonificationState = new Map();
         console.log('ComicGenerator initialized with base path:', this.basePath);
     },
 
     handleGenerationSuccess(response) {
         if (response.success) {
             console.log('Comic generation initiated:', response.result);
+
+            // Initialize cartoonification state with original panel ID
+            if (response.result.pending_predictions) {
+                response.result.pending_predictions.forEach(predId => {
+                    this.cartoonificationState.set(predId, {
+                        status: 'pending',
+                        started_at: new Date().getTime(),
+                        original_prediction_id: response.result.id
+                    });
+                });
+            }
 
             // Update UI to show progress
             $('#debugInfo').html(`
