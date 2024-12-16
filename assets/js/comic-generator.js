@@ -17,11 +17,14 @@ export const ComicGenerator = {
         if (response.success) {
             console.log('Comic generation initiated:', response.result);
 
+            // Store the original panel ID first
+            const originalPanelId = response.result.original_prediction_id || response.result.id;
+            this.originalPanelId = originalPanelId;  // Store at instance level
+
+            console.log('Setting up tracking with original panel ID:', originalPanelId);
+
             // Initialize cartoonification state with original panel ID
             if (response.result.pending_predictions) {
-                const originalPanelId = response.result.original_prediction_id || response.result.id;
-                console.log('Setting up cartoonification tracking with original panel ID:', originalPanelId);
-
                 response.result.pending_predictions.forEach(predId => {
                     this.cartoonificationState.set(predId, {
                         status: 'pending',
@@ -37,19 +40,30 @@ export const ComicGenerator = {
                         sdxl: 'waiting',
                         progress: 0,
                         started_at: new Date().getTime(),
-                        last_update: new Date().getTime()
+                        last_update: new Date().getTime(),
+                        original_prediction_id: originalPanelId  // Add this to stages tracking
                     });
                 });
 
-                // Also store the original panel ID separately
-                this.originalPanelId = originalPanelId;
+                // Also track the original panel ID's state
+                this.processStages.set(originalPanelId, {
+                    current: 'initializing',
+                    cartoonification: 'pending',
+                    sdxl: 'waiting',
+                    progress: 0,
+                    started_at: new Date().getTime(),
+                    last_update: new Date().getTime()
+                });
             }
 
             // Update UI to show progress
-            this.updateProgressUI(response.result);
+            this.updateProgressUI({
+                ...response.result,
+                id: originalPanelId
+            });
 
-            // Start checking for results - use original panel ID if available
-            this.checkResult(response.result.original_prediction_id || response.result.id);
+            // Start checking for results using the original panel ID
+            this.checkResult(originalPanelId);
         } else {
             console.error('Comic generation returned error:', response.message);
             this.handleGenerationError(response.message);
@@ -266,11 +280,14 @@ export const ComicGenerator = {
             return;
         }
 
-        const apiUrl = this.getApiUrl(`public/temp/${predictionId}.json`);
-        console.log('Polling URL:', apiUrl);
+        // Always use original panel ID if available
+        const idToCheck = this.originalPanelId || predictionId;
+
+        const apiUrl = this.getApiUrl(`public/temp/${idToCheck}.json`);
+        console.log('Polling URL:', apiUrl, 'Original ID:', this.originalPanelId);
 
         // Check for timeout
-        const stages = this.processStages.get(predictionId);
+        const stages = this.processStages.get(idToCheck);
         if (stages && Date.now() - stages.started_at > this.timeoutDuration) {
             console.error('Generation timed out after', this.timeoutDuration / 1000, 'seconds');
             this.handleGenerationError('Generation timed out. Please try again.');
@@ -281,7 +298,7 @@ export const ComicGenerator = {
         if (stages && Date.now() - stages.last_update > 120000) {
             console.warn('Process appears stalled, no updates for 2 minutes');
             // Increment retry count
-            const state = this.cartoonificationState.get(predictionId);
+            const state = this.cartoonificationState.get(idToCheck);
             if (state && state.retries < this.maxRetries) {
                 state.retries++;
                 console.log(`Retrying request (${state.retries}/${this.maxRetries})`);
