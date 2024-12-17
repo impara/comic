@@ -242,19 +242,31 @@ class ReplicateClient
                     'webhook_events_filter' => ['completed']
                 ]);
 
-                // Ensure original prediction ID is maintained
-                if (isset($params['original_prediction_id'])) {
-                    $result['original_prediction_id'] = $params['original_prediction_id'];
-                }
+                // Log the SDXL API call result
+                $this->logger->error("TEST_LOG - SDXL API call result", [
+                    'prediction_id' => $result['id'],
+                    'original_panel_id' => $params['original_panel_id'] ?? null,
+                    'webhook_url' => $webhookUrl,
+                    'has_cartoonified_image' => isset($params['cartoonified_image'])
+                ]);
 
-                // Create mapping file for webhook
-                $mappingFile = $this->config->getTempPath() . "mapping_{$result['id']}.json";
-                file_put_contents($mappingFile, json_encode([
-                    'original_prediction_id' => $params['original_prediction_id'] ?? null,
-                    'panel_prediction_id' => $result['id'],
-                    'cartoonified_images' => [$params['cartoonified_image']],
-                    'created_at' => date('c')
-                ]));
+                // Create state file for SDXL if original_panel_id is provided
+                if (isset($params['original_panel_id'])) {
+                    $stateFile = $this->config->getTempPath() . "state_{$params['original_panel_id']}.json";
+                    if (file_exists($stateFile)) {
+                        $state = json_decode(file_get_contents($stateFile), true);
+                        $state['sdxl_prediction_id'] = $result['id'];
+                        $state['sdxl_status'] = 'processing';
+                        $state['sdxl_started_at'] = time();
+                        file_put_contents($stateFile, json_encode($state));
+
+                        $this->logger->error("TEST_LOG - Updated state file with SDXL start", [
+                            'state_file' => basename($stateFile),
+                            'prediction_id' => $result['id'],
+                            'original_panel_id' => $params['original_panel_id']
+                        ]);
+                    }
+                }
 
                 return $result;
             } else if (isset($params['character_image'])) {

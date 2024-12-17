@@ -77,79 +77,53 @@ class CharacterProcessor
                 throw new Exception("Character image is required");
             }
 
+            if (!isset($character['id'])) {
+                throw new Exception("Character ID is required");
+            }
+
             // Skip cartoonification if the image is already a Replicate URL
             if (strpos($character['image'], 'replicate.delivery') !== false) {
                 return [
                     'id' => $character['id'],
-                    'name' => $character['name'],
-                    'description' => $character['description'],
-                    'image' => $character['image'],
-                    'cartoonified_image' => $character['image'],
-                    'options' => $character['options'] ?? []
+                    'output' => $character['image'],
+                    'status' => 'succeeded',
+                    'character_id' => $character['id']
                 ];
             }
 
             // Start cartoonification
             $result = $this->cartoonifyCharacter($character['image'], $character['options'] ?? []);
-            $predictionId = $result['id'];
 
-            // Create a pending file to track this cartoonification
-            $tempPath = $this->config->getTempPath();
-            $pendingFile = $tempPath . "pending_{$predictionId}.json";
-
-            $panelData = [
-                'characters' => [$character],
-                'scene_description' => $character['options']['scene_description'] ?? $character['scene_description'] ?? ''
-            ];
-
-            $pendingData = [
-                'prediction_id' => $predictionId,
-                'original_image' => $character['image'],
-                'character_data' => $character,
-                'panel_data' => json_encode($panelData),
-                'started_at' => time()
-            ];
-
-            $this->logger->error("TEST_LOG - Starting cartoonification", [
+            $this->logger->error("TEST_LOG - Cartoonification API call result", [
                 'character_id' => $character['id'],
-                'prediction_id' => $predictionId,
-                'has_scene_description' => isset($character['options']['scene_description']) || isset($character['scene_description']),
-                'scene_description' => $character['options']['scene_description'] ?? $character['scene_description'] ?? 'none',
-                'style' => $character['options']['style'] ?? 'default'
+                'prediction_id' => $result['id'],
+                'status' => $result['status'] ?? 'unknown',
+                'has_output' => isset($result['output'])
             ]);
 
-            $this->logger->error("TEST_LOG - Creating pending file", [
-                'file' => basename($pendingFile),
-                'prediction_id' => $predictionId,
-                'has_scene_description' => isset($character['options']['scene_description']) || isset($character['scene_description']),
-                'panel_data' => $panelData,
-                'pending_data' => $pendingData
-            ]);
-
-            file_put_contents($pendingFile, json_encode($pendingData));
-
-            // Verify the pending file was created and contains correct data
-            if (file_exists($pendingFile)) {
-                $writtenData = json_decode(file_get_contents($pendingFile), true);
-                $this->logger->error("TEST_LOG - Verified pending file", [
-                    'file' => basename($pendingFile),
-                    'exists' => true,
-                    'has_prediction_id' => isset($writtenData['prediction_id']),
-                    'prediction_matches' => ($writtenData['prediction_id'] ?? '') === $predictionId,
-                    'has_panel_data' => isset($writtenData['panel_data']),
-                    'panel_data_decoded' => json_decode($writtenData['panel_data'] ?? '{}', true)
-                ]);
+            // Check for error status
+            if (isset($result['status']) && $result['status'] === 'failed') {
+                throw new Exception($result['error'] ?? 'Cartoonification failed without specific error');
             }
 
-            // Return immediately with the prediction ID
-            return array_merge($character, [
-                'cartoonified_image' => null,
-                'prediction_id' => $predictionId
-            ]);
+            // Add character ID to the result for tracking
+            $result['character_id'] = $character['id'];
+
+            // Ensure required fields are present
+            if (!isset($result['id'])) {
+                throw new Exception("Missing prediction ID in cartoonification result");
+            }
+
+            if (isset($result['output']) && !filter_var($result['output'], FILTER_VALIDATE_URL)) {
+                throw new Exception("Invalid output URL in cartoonification result");
+            }
+
+            return $result;
         } catch (Exception $e) {
             $this->logger->error("Character processing failed", [
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'trace' => $e->getTraceAsString(),
+                'character_id' => $character['id']
             ]);
             throw $e;
         }

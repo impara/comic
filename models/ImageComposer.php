@@ -27,8 +27,10 @@ class ImageComposer
      */
     public function composePanel(array $images, array $sceneContext = [], array $userPositions = []): string
     {
+        $panelId = $sceneContext['panel_id'] ?? null;
         $this->logger->error("TEST_LOG - composePanel received images", [
             'image_count' => count($images),
+            'panel_id' => $panelId,
             'images' => array_map(function ($url, $index) {
                 return [
                     'index' => $index,
@@ -40,6 +42,17 @@ class ImageComposer
         ]);
 
         try {
+            // Update state if panel ID is provided
+            if ($panelId) {
+                $stateFile = $this->config->getTempPath() . "state_{$panelId}.json";
+                if (file_exists($stateFile)) {
+                    $state = json_decode(file_get_contents($stateFile), true);
+                    $state['composition_status'] = 'processing';
+                    $state['composition_started_at'] = time();
+                    file_put_contents($stateFile, json_encode($state));
+                }
+            }
+
             // Validate all images are valid URLs
             $validImages = array_filter($images, function ($url) {
                 return filter_var($url, FILTER_VALIDATE_URL) !== false;
@@ -51,6 +64,12 @@ class ImageComposer
                     'total_count' => count($images),
                     'invalid_urls' => array_diff($images, $validImages)
                 ]);
+
+                // Update state with error
+                if ($panelId) {
+                    $this->updateStateWithError($panelId, "Some images have invalid URLs");
+                }
+
                 throw new Exception("Some images have invalid URLs");
             }
 
@@ -86,6 +105,12 @@ class ImageComposer
                         'url' => $imageUrl,
                         'index' => $index
                     ]);
+
+                    // Update state with error
+                    if ($panelId) {
+                        $this->updateStateWithError($panelId, "Failed to load character image: $imageUrl");
+                    }
+
                     continue;
                 }
 
@@ -140,6 +165,18 @@ class ImageComposer
             imagepng($panel, $outputPath);
             imagedestroy($panel);
 
+            // Update state with success
+            if ($panelId) {
+                $stateFile = $this->config->getTempPath() . "state_{$panelId}.json";
+                if (file_exists($stateFile)) {
+                    $state = json_decode(file_get_contents($stateFile), true);
+                    $state['composition_status'] = 'succeeded';
+                    $state['composition_completed_at'] = time();
+                    $state['composed_panel_path'] = $outputPath;
+                    file_put_contents($stateFile, json_encode($state));
+                }
+            }
+
             $this->logger->error("TEST_LOG - Panel composition completed", [
                 'output_path' => $outputPath,
                 'file_exists' => file_exists($outputPath),
@@ -153,7 +190,28 @@ class ImageComposer
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString()
             ]);
+
+            // Update state with error
+            if ($panelId) {
+                $this->updateStateWithError($panelId, $e->getMessage());
+            }
+
             throw $e;
+        }
+    }
+
+    /**
+     * Update state file with error information
+     */
+    private function updateStateWithError(string $panelId, string $error): void
+    {
+        $stateFile = $this->config->getTempPath() . "state_{$panelId}.json";
+        if (file_exists($stateFile)) {
+            $state = json_decode(file_get_contents($stateFile), true);
+            $state['composition_status'] = 'failed';
+            $state['composition_error'] = $error;
+            $state['composition_failed_at'] = time();
+            file_put_contents($stateFile, json_encode($state));
         }
     }
 

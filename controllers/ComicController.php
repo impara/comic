@@ -101,8 +101,8 @@ class ComicController
                         'result' => $result
                     ]);
 
-                    // Get the first prediction ID to use as the main one
-                    $mainPredictionId = $result['original_prediction_id'];
+                    // Get the panel ID to use as the main one
+                    $panelId = $result['original_panel_id'];
 
                     // Update the pending file with panel data
                     $tempPath = $this->config->getTempPath();
@@ -118,12 +118,12 @@ class ComicController
 
                     echo json_encode([
                         'success' => true,
-                        'message' => $result['message'],
+                        'message' => $result['message'] ?? 'Processing started',
                         'result' => [
-                            'id' => $mainPredictionId,
+                            'id' => $panelId,
                             'status' => 'processing',
                             'pending_predictions' => $result['pending_predictions'],
-                            'original_prediction_id' => $mainPredictionId
+                            'original_panel_id' => $panelId
                         ]
                     ]);
                     return;

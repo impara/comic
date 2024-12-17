@@ -64,45 +64,8 @@ try {
     $predictionId = $data['id'];
     $tempPath = $config->getTempPath();
 
-    // First check if this is an SDXL completion by looking for panel files
-    $panelFiles = glob($tempPath . "panel_*.json");
-    foreach ($panelFiles as $panelFile) {
-        $panel = json_decode(file_get_contents($panelFile), true);
-        if (isset($panel['sdxl_prediction_id']) && $panel['sdxl_prediction_id'] === $predictionId) {
-            $logger->error("TEST_LOG - Found matching SDXL completion", [
-                'panel_id' => basename($panelFile, '.json'),
-                'sdxl_prediction_id' => $predictionId
-            ]);
-
-            if ($data['status'] === 'succeeded' && !empty($data['output'])) {
-                // Update panel with final output
-                $panel['status'] = 'succeeded';
-                $panel['output'] = is_array($data['output']) ? $data['output'][0] : $data['output'];
-                $panel['completed_at'] = date('c');
-                file_put_contents($panelFile, json_encode($panel));
-
-                // Also update the original panel's state file if it exists
-                $stateFile = $tempPath . "state_" . basename($panelFile);
-                if (file_exists($stateFile)) {
-                    $state = json_decode(file_get_contents($stateFile), true);
-                    $state['sdxl_status'] = 'succeeded';
-                    $state['sdxl_output'] = $panel['output'];
-                    $state['sdxl_completed_at'] = date('c');
-                    file_put_contents($stateFile, json_encode($state));
-                }
-
-                $logger->error("TEST_LOG - Updated panel with SDXL output", [
-                    'panel_id' => basename($panelFile, '.json'),
-                    'output_url' => $panel['output']
-                ]);
-            }
-            return;
-        }
-    }
-
-    // If not SDXL, check for cartoonification completion
+    // First check pending files to find the stage
     $pendingFiles = glob($tempPath . "pending_*.json");
-
     $logger->error("TEST_LOG - Searching for pending file", [
         'prediction_id' => $predictionId,
         'pending_files' => array_map('basename', $pendingFiles)
@@ -138,145 +101,257 @@ try {
                 'status' => $data['status']
             ]);
 
-            // Update the original panel's state file
+            // Get state file path
             $stateFile = $tempPath . "state_{$originalPanelId}.json";
-            if (file_exists($stateFile)) {
-                $state = json_decode(file_get_contents($stateFile), true);
-                $logger->error("TEST_LOG - Current state", [
+            if (!file_exists($stateFile)) {
+                $logger->error("State file not found", [
                     'state_file' => basename($stateFile),
-                    'cartoonification_requests' => $state['cartoonification_requests'] ?? []
+                    'original_panel_id' => $originalPanelId
                 ]);
-
-                foreach ($state['cartoonification_requests'] ?? [] as &$request) {
-                    if ($request['prediction_id'] === $predictionId) {
-                        $request['status'] = $data['status'];
-                        $request['completed_at'] = time();
-                        if ($data['status'] === 'succeeded') {
-                            $request['output'] = is_array($data['output']) ? $data['output'][0] : $data['output'];
-                        }
-                        break;
-                    }
-                }
-                file_put_contents($stateFile, json_encode($state));
+                continue;
             }
 
-            if ($currentStage === 'cartoonify' && $data['status'] === 'succeeded') {
-                $logger->error("TEST_LOG - Cartoonification succeeded, preparing SDXL", [
-                    'original_panel_id' => $originalPanelId,
-                    'cartoonified_url' => is_array($data['output']) ? $data['output'][0] : $data['output']
+            $state = json_decode(file_get_contents($stateFile), true);
+            if (!$state) {
+                $logger->error("Invalid state file format", [
+                    'state_file' => basename($stateFile)
                 ]);
+                continue;
+            }
 
-                // Store the cartoonification result
-                $cartoonificationResult = [
-                    'id' => $predictionId,
-                    'status' => 'succeeded',
-                    'type' => 'cartoonification',
-                    'output' => is_array($data['output']) ? $data['output'][0] : $data['output'],
-                    'completed_at' => date('c'),
-                    'original_panel_id' => $originalPanelId
-                ];
-
-                // Store result in original panel's directory
-                file_put_contents(
-                    $tempPath . "{$originalPanelId}_cartoonify_{$predictionId}.json",
-                    json_encode($cartoonificationResult)
-                );
-
-                // Trigger SDXL
-                require_once __DIR__ . '/models/ReplicateClient.php';
-                $replicateClient = new ReplicateClient($logger);
-
-                try {
-                    // Parse panel data
-                    $panelData = json_decode($pending['panel_data'], true);
-                    if (!$panelData) {
-                        throw new Exception("Invalid panel data format");
+            if ($currentStage === 'sdxl') {
+                // Handle SDXL completion
+                if ($data['status'] === 'succeeded' && !empty($data['output'])) {
+                    // Update state with success
+                    $state['sdxl_status'] = 'succeeded';
+                    $state['sdxl_output'] = is_array($data['output']) ? $data['output'][0] : $data['output'];
+                    $state['sdxl_completed_at'] = time();
+                    $state['status'] = 'succeeded';
+                    if (file_put_contents($stateFile, json_encode($state)) === false) {
+                        throw new Exception("Failed to update state file");
                     }
 
-                    $logger->error("TEST_LOG - Starting SDXL generation", [
-                        'original_panel_id' => $originalPanelId,
-                        'scene_description' => $panelData['scene_description'],
-                        'cartoonified_url' => $cartoonificationResult['output']
+                    // Write final result
+                    $finalResult = [
+                        'id' => $originalPanelId,
+                        'status' => 'succeeded',
+                        'output' => $state['sdxl_output'],
+                        'completed_at' => date('c')
+                    ];
+                    if (file_put_contents($tempPath . "{$originalPanelId}.json", json_encode($finalResult)) === false) {
+                        throw new Exception("Failed to write final result file");
+                    }
+
+                    $logger->error("TEST_LOG - Updated state file with SDXL completion", [
+                        'state_file' => basename($stateFile),
+                        'panel_id' => $originalPanelId,
+                        'sdxl_prediction_id' => $predictionId,
+                        'output_url' => $state['sdxl_output']
+                    ]);
+                } else if ($data['status'] === 'failed') {
+                    // Update state with failure
+                    $state['sdxl_status'] = 'failed';
+                    $state['sdxl_error'] = $data['error'] ?? 'SDXL generation failed';
+                    $state['sdxl_failed_at'] = time();
+                    $state['status'] = 'failed';
+                    if (file_put_contents($stateFile, json_encode($state)) === false) {
+                        throw new Exception("Failed to update state file with error");
+                    }
+
+                    // Write final result with error
+                    $finalResult = [
+                        'id' => $originalPanelId,
+                        'status' => 'failed',
+                        'error' => $state['sdxl_error'],
+                        'failed_at' => date('c')
+                    ];
+                    if (file_put_contents($tempPath . "{$originalPanelId}.json", json_encode($finalResult)) === false) {
+                        throw new Exception("Failed to write final error file");
+                    }
+
+                    $logger->error("TEST_LOG - Updated state file with SDXL failure", [
+                        'state_file' => basename($stateFile),
+                        'panel_id' => $originalPanelId,
+                        'sdxl_prediction_id' => $predictionId,
+                        'error' => $state['sdxl_error']
+                    ]);
+                }
+
+                // Clean up all pending files for this panel
+                $allPendingFiles = glob($tempPath . "pending_*.json");
+                foreach ($allPendingFiles as $otherFile) {
+                    $otherPending = json_decode(file_get_contents($otherFile), true);
+                    if (isset($otherPending['original_panel_id']) && $otherPending['original_panel_id'] === $originalPanelId) {
+                        @unlink($otherFile);
+                        $logger->error("TEST_LOG - Cleaned up pending file", [
+                            'file' => basename($otherFile),
+                            'original_panel_id' => $originalPanelId
+                        ]);
+                    }
+                }
+
+                return;
+            } else if ($currentStage === 'cartoonify') {
+                // Handle cartoonification completion
+                if ($data['status'] === 'succeeded') {
+                    // Update cartoonification request status
+                    if (!isset($state['cartoonification_requests'])) {
+                        $state['cartoonification_requests'] = [];
+                    }
+
+                    $requestFound = false;
+                    foreach ($state['cartoonification_requests'] as &$request) {
+                        if ($request['prediction_id'] === $predictionId) {
+                            $request['status'] = 'succeeded';
+                            $request['completed_at'] = time();
+                            $request['output'] = is_array($data['output']) ? $data['output'][0] : $data['output'];
+                            $requestFound = true;
+                            break;
+                        }
+                    }
+
+                    if (!$requestFound) {
+                        // Add new request if not found
+                        $state['cartoonification_requests'][] = [
+                            'prediction_id' => $predictionId,
+                            'status' => 'succeeded',
+                            'completed_at' => time(),
+                            'output' => is_array($data['output']) ? $data['output'][0] : $data['output']
+                        ];
+                    }
+
+                    // Check if all cartoonification requests are complete
+                    $allComplete = true;
+                    foreach ($state['cartoonification_requests'] as $request) {
+                        if ($request['status'] !== 'succeeded') {
+                            $allComplete = false;
+                            break;
+                        }
+                    }
+
+                    if ($allComplete) {
+                        $state['status'] = 'cartoonification_complete';
+                    }
+
+                    if (file_put_contents($stateFile, json_encode($state)) === false) {
+                        throw new Exception("Failed to update state file");
+                    }
+
+                    $logger->error("TEST_LOG - Updated state file with cartoonification success", [
+                        'state_file' => basename($stateFile),
+                        'prediction_id' => $predictionId,
+                        'status' => $state['status'],
+                        'cartoonification_count' => count($state['cartoonification_requests'])
                     ]);
 
-                    // Start SDXL generation
-                    $sdxlResult = $replicateClient->generateImage([
-                        'cartoonified_image' => $cartoonificationResult['output'],
-                        'prompt' => $panelData['scene_description'],
-                        'original_panel_id' => $originalPanelId,
-                        'options' => [
-                            'style' => $panelData['characters'][0]['options']['style'] ?? 'modern'
-                        ]
-                    ]);
+                    // Start SDXL if cartoonification is complete
+                    if ($allComplete) {
+                        // Get cartoonified URL
+                        $cartoonifiedUrl = null;
+                        foreach ($state['cartoonification_requests'] as $request) {
+                            if ($request['status'] === 'succeeded' && !empty($request['output'])) {
+                                $cartoonifiedUrl = $request['output'];
+                                break;
+                            }
+                        }
 
-                    // Create new pending file for SDXL
-                    $sdxlPendingFile = $tempPath . "pending_{$sdxlResult['id']}.json";
-                    file_put_contents($sdxlPendingFile, json_encode([
-                        'prediction_id' => $sdxlResult['id'],
-                        'original_panel_id' => $originalPanelId,
-                        'stage' => 'sdxl',
-                        'cartoonified_url' => $cartoonificationResult['output'],
-                        'started_at' => time(),
-                        'panel_data' => $pending['panel_data'] // Preserve original panel data
-                    ]));
+                        if (!$cartoonifiedUrl) {
+                            throw new Exception("No successful cartoonification output found");
+                        }
 
-                    // Update state file with SDXL status
-                    if (file_exists($stateFile)) {
-                        $state = json_decode(file_get_contents($stateFile), true);
+                        // Start SDXL
+                        $sdxlResult = $replicateClient->generateImage([
+                            'cartoonified_image' => $cartoonifiedUrl,
+                            'prompt' => $panelData['scene_description'],
+                            'original_panel_id' => $originalPanelId,
+                            'options' => [
+                                'style' => $panelData['characters'][0]['options']['style'] ?? 'modern'
+                            ]
+                        ]);
+
+                        // 1. Create SDXL pending file FIRST
+                        $sdxlPendingFile = $tempPath . "pending_{$sdxlResult['id']}.json";
+                        file_put_contents($sdxlPendingFile, json_encode([
+                            'prediction_id' => $sdxlResult['id'],
+                            'original_panel_id' => $originalPanelId,
+                            'stage' => 'sdxl',
+                            'cartoonified_url' => $cartoonifiedUrl,
+                            'started_at' => time(),
+                            'panel_data' => $pending['panel_data']
+                        ]));
+
+                        // 2. Verify SDXL pending file exists and is valid
+                        if (!file_exists($sdxlPendingFile)) {
+                            throw new Exception("SDXL pending file was not created");
+                        }
+
+                        // 3. Update state file
                         $state['sdxl_status'] = 'processing';
                         $state['sdxl_prediction_id'] = $sdxlResult['id'];
                         $state['sdxl_started_at'] = time();
                         file_put_contents($stateFile, json_encode($state));
+
+                        // 4. Only NOW delete cartoonify pending file
+                        @unlink($pendingFile);
+
+                        return;
+                    }
+                } else if ($data['status'] === 'failed') {
+                    // Handle failed cartoonification
+                    if (!isset($state['cartoonification_requests'])) {
+                        $state['cartoonification_requests'] = [];
                     }
 
-                    $logger->error("TEST_LOG - SDXL generation initiated", [
-                        'sdxl_prediction_id' => $sdxlResult['id'],
-                        'original_panel_id' => $originalPanelId,
-                        'pending_file' => basename($sdxlPendingFile)
-                    ]);
-                } catch (Exception $e) {
-                    $logger->error("Failed to start SDXL", [
-                        'error' => $e->getMessage(),
-                        'original_panel_id' => $originalPanelId,
-                        'trace' => $e->getTraceAsString()
-                    ]);
-                }
-            } elseif ($currentStage === 'sdxl') {
-                $logger->error("TEST_LOG - Processing SDXL completion", [
-                    'prediction_id' => $predictionId,
-                    'original_panel_id' => $originalPanelId,
-                    'status' => $data['status']
-                ]);
-
-                if ($data['status'] === 'succeeded') {
-                    // Update state file with SDXL completion
-                    if (file_exists($stateFile)) {
-                        $state = json_decode(file_get_contents($stateFile), true);
-                        $state['sdxl_status'] = 'succeeded';
-                        $state['sdxl_output'] = is_array($data['output']) ? $data['output'][0] : $data['output'];
-                        $state['sdxl_completed_at'] = time();
-                        file_put_contents($stateFile, json_encode($state));
+                    $requestFound = false;
+                    foreach ($state['cartoonification_requests'] as &$request) {
+                        if ($request['prediction_id'] === $predictionId) {
+                            $request['status'] = 'failed';
+                            $request['completed_at'] = time();
+                            $request['error'] = $data['error'] ?? 'Cartoonification failed';
+                            $requestFound = true;
+                            break;
+                        }
                     }
 
-                    // Write final result to original panel file
+                    if (!$requestFound) {
+                        // Add new failed request if not found
+                        $state['cartoonification_requests'][] = [
+                            'prediction_id' => $predictionId,
+                            'status' => 'failed',
+                            'completed_at' => time(),
+                            'error' => $data['error'] ?? 'Cartoonification failed'
+                        ];
+                    }
+
+                    // Mark the entire process as failed
+                    $state['status'] = 'failed';
+                    $state['error'] = 'Character cartoonification failed';
+                    if (file_put_contents($stateFile, json_encode($state)) === false) {
+                        throw new Exception("Failed to update state file with failure");
+                    }
+
+                    // Create final result with error
                     $finalResult = [
                         'id' => $originalPanelId,
-                        'status' => 'succeeded',
-                        'output' => is_array($data['output']) ? $data['output'][0] : $data['output'],
-                        'completed_at' => date('c')
+                        'status' => 'failed',
+                        'error' => $state['error'],
+                        'failed_at' => date('c')
                     ];
-                    file_put_contents($tempPath . "{$originalPanelId}.json", json_encode($finalResult));
+                    if (file_put_contents($tempPath . "{$originalPanelId}.json", json_encode($finalResult)) === false) {
+                        throw new Exception("Failed to write final error file");
+                    }
 
-                    $logger->error("TEST_LOG - SDXL completed successfully", [
-                        'original_panel_id' => $originalPanelId,
-                        'output_url' => $finalResult['output']
+                    $logger->error("TEST_LOG - Updated state file with cartoonification failure", [
+                        'state_file' => basename($stateFile),
+                        'prediction_id' => $predictionId,
+                        'error' => $state['error']
                     ]);
                 }
-            }
 
-            // Clean up the pending file
-            @unlink($pendingFile);
-            break;
+                // Clean up this pending file
+                @unlink($pendingFile);
+                return;
+            }
         }
     }
 
@@ -288,6 +363,44 @@ try {
         'error' => $e->getMessage(),
         'trace' => $e->getTraceAsString()
     ]);
+
+    // Try to update state file if we have panel ID
+    if (isset($originalPanelId) && isset($stateFile) && file_exists($stateFile)) {
+        $state = json_decode(file_get_contents($stateFile), true);
+        $state['status'] = 'failed';
+        $state['error'] = $e->getMessage();
+        $state['failed_at'] = time();
+        file_put_contents($stateFile, json_encode($state));
+
+        // Create final result file with error
+        $finalResult = [
+            'id' => $originalPanelId,
+            'status' => 'failed',
+            'error' => $e->getMessage(),
+            'failed_at' => date('c')
+        ];
+        file_put_contents($tempPath . "{$originalPanelId}.json", json_encode($finalResult));
+
+        $logger->error("TEST_LOG - Created final error result", [
+            'panel_id' => $originalPanelId,
+            'error' => $e->getMessage()
+        ]);
+    }
+
+    // Clean up any pending files if we have panel ID
+    if (isset($originalPanelId) && isset($tempPath)) {
+        $pendingFiles = glob($tempPath . "pending_*.json");
+        foreach ($pendingFiles as $pendingFile) {
+            $pending = json_decode(file_get_contents($pendingFile), true);
+            if (isset($pending['original_panel_id']) && $pending['original_panel_id'] === $originalPanelId) {
+                @unlink($pendingFile);
+                $logger->error("TEST_LOG - Cleaned up pending file during error", [
+                    'file' => basename($pendingFile),
+                    'original_panel_id' => $originalPanelId
+                ]);
+            }
+        }
+    }
 
     http_response_code(500);
     echo json_encode([
