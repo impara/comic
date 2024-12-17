@@ -302,8 +302,8 @@ export const ComicGenerator = {
 
                         // Display the final image
                         if (state.sdxl_output) {
-                            $('#resultImage').attr('src', state.sdxl_output).show();
-                            UIManager.showGenerationComplete();
+                            $('.comic-preview').html(`<img src="${state.sdxl_output}" class="img-fluid mb-4" alt="Generated Comic">`);
+                            UIManager.showCompletionState();
                         } else {
                             this.handleGenerationError('Missing final image in successful state');
                         }
