@@ -244,33 +244,40 @@ export const ComicGenerator = {
             return;
         }
 
-        // Check for panel result first
-        const panelApiUrl = this.getApiUrl(`public/temp/panel_${predictionId}.json`);
+        // First try the panel file
+        const panelId = predictionId.startsWith('panel_') ? predictionId : `panel_${predictionId}`;
+        const panelUrl = this.getApiUrl(`public/temp/${panelId}.json`);
 
         $.ajax({
-            url: panelApiUrl,
+            url: panelUrl,
             type: 'GET',
             dataType: 'json',
             success: (result) => {
-                console.log('Result check response:', result);
+                console.log('Panel check response:', result);
 
                 if (result.status === 'succeeded' && result.output) {
                     this.displayGeneratedComic(result);
+                } else if (result.status === 'processing') {
+                    // Panel is still processing, continue polling
+                    setTimeout(() => this.checkResult(panelId), 5000);
                 } else {
-                    // If panel not ready, check original prediction
-                    const originalApiUrl = this.getApiUrl(`public/temp/${predictionId}.json`);
+                    // Try the original prediction file
+                    const predictionUrl = this.getApiUrl(`public/temp/${predictionId}.json`);
                     $.ajax({
-                        url: originalApiUrl,
+                        url: predictionUrl,
                         type: 'GET',
                         dataType: 'json',
-                        success: (originalResult) => {
-                            if (originalResult.panel_id) {
-                                setTimeout(() => this.checkResult(originalResult.panel_id), 5000);
+                        success: (predResult) => {
+                            if (predResult.panel_id) {
+                                // Found new panel ID, switch to polling that
+                                setTimeout(() => this.checkResult(predResult.panel_id), 5000);
                             } else {
+                                // Keep polling original ID
                                 setTimeout(() => this.checkResult(predictionId), 5000);
                             }
                         },
                         error: () => {
+                            // On error, keep polling original ID
                             setTimeout(() => this.checkResult(predictionId), 5000);
                         }
                     });
@@ -278,20 +285,23 @@ export const ComicGenerator = {
             },
             error: (xhr) => {
                 if (xhr.status === 404) {
-                    // If panel not found, check original prediction
-                    const originalApiUrl = this.getApiUrl(`public/temp/${predictionId}.json`);
+                    // Panel file not found, try original prediction
+                    const predictionUrl = this.getApiUrl(`public/temp/${predictionId}.json`);
                     $.ajax({
-                        url: originalApiUrl,
+                        url: predictionUrl,
                         type: 'GET',
                         dataType: 'json',
-                        success: (originalResult) => {
-                            if (originalResult.panel_id) {
-                                setTimeout(() => this.checkResult(originalResult.panel_id), 5000);
+                        success: (predResult) => {
+                            if (predResult.panel_id) {
+                                // Found panel ID, switch to polling that
+                                setTimeout(() => this.checkResult(predResult.panel_id), 5000);
                             } else {
+                                // Keep polling original ID
                                 setTimeout(() => this.checkResult(predictionId), 5000);
                             }
                         },
                         error: () => {
+                            // On error, keep polling original ID
                             setTimeout(() => this.checkResult(predictionId), 5000);
                         }
                     });
