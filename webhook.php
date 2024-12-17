@@ -283,8 +283,19 @@ try {
                     );
 
                     $logger->error("TEST_LOG - Panel generation completed after cartoonification", [
-                        'result' => $panelResult
+                        'result' => $panelResult,
+                        'panel_id' => $panelResult['id']
                     ]);
+
+                    // Store panel info in original prediction file for frontend access
+                    $originalPredictionFile = $tempPath . $pending['original_prediction_id'] . '.json';
+                    $originalPrediction = [];
+                    if (file_exists($originalPredictionFile)) {
+                        $originalPrediction = json_decode(file_get_contents($originalPredictionFile), true) ?? [];
+                    }
+                    $originalPrediction['panel_id'] = $panelResult['id'];
+                    $originalPrediction['status'] = 'processing';
+                    file_put_contents($originalPredictionFile, json_encode($originalPrediction));
 
                     // Now trigger SDXL with cartoonified image
                     try {
@@ -303,9 +314,14 @@ try {
 
                         // Update panel file with SDXL prediction ID
                         $panelFile = $tempPath . $panelResult['id'] . '.json';
-                        $currentPanel = json_decode(file_get_contents($panelFile), true) ?? [];
-                        $currentPanel['sdxl_prediction_id'] = $sdxlResult['id'];
-                        $currentPanel['status'] = 'processing';
+                        $currentPanel = [
+                            'id' => $panelResult['id'],
+                            'status' => 'processing',
+                            'sdxl_prediction_id' => $sdxlResult['id'],
+                            'cartoonified_url' => $cartoonifiedUrl,
+                            'original_prediction_id' => $pending['original_prediction_id'],
+                            'created_at' => date('c')
+                        ];
                         file_put_contents($panelFile, json_encode($currentPanel));
 
                         $logger->error("TEST_LOG - SDXL generation initiated", [

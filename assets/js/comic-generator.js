@@ -244,67 +244,52 @@ export const ComicGenerator = {
             return;
         }
 
-        // First try the panel file
-        const panelId = predictionId.startsWith('panel_') ? predictionId : `panel_${predictionId}`;
-        const panelUrl = this.getApiUrl(`public/temp/${panelId}.json`);
+        // First try the original prediction file
+        const predictionUrl = this.getApiUrl(`public/temp/${predictionId}.json`);
+        console.log('Generated API URL:', predictionUrl);
 
         $.ajax({
-            url: panelUrl,
+            url: predictionUrl,
             type: 'GET',
             dataType: 'json',
             success: (result) => {
-                console.log('Panel check response:', result);
+                console.log('Prediction check response:', result);
 
-                if (result.status === 'succeeded' && result.output) {
-                    this.displayGeneratedComic(result);
-                } else if (result.status === 'processing') {
-                    // Panel is still processing, continue polling
-                    setTimeout(() => this.checkResult(panelId), 5000);
-                } else {
-                    // Try the original prediction file
-                    const predictionUrl = this.getApiUrl(`public/temp/${predictionId}.json`);
+                if (result.panel_id) {
+                    // We have a panel ID, check the panel file
+                    const panelUrl = this.getApiUrl(`public/temp/${result.panel_id}.json`);
+                    console.log('Checking panel URL:', panelUrl);
+
                     $.ajax({
-                        url: predictionUrl,
+                        url: panelUrl,
                         type: 'GET',
                         dataType: 'json',
-                        success: (predResult) => {
-                            if (predResult.panel_id) {
-                                // Found new panel ID, switch to polling that
-                                setTimeout(() => this.checkResult(predResult.panel_id), 5000);
+                        success: (panelResult) => {
+                            if (panelResult.status === 'succeeded' && panelResult.output) {
+                                this.displayGeneratedComic(panelResult);
                             } else {
-                                // Keep polling original ID
+                                // Panel is still processing, continue polling original ID
                                 setTimeout(() => this.checkResult(predictionId), 5000);
                             }
                         },
                         error: () => {
-                            // On error, keep polling original ID
+                            // Panel file not found or error, keep polling original ID
                             setTimeout(() => this.checkResult(predictionId), 5000);
                         }
                     });
+                } else if (result.status === 'succeeded' && result.output) {
+                    // Direct success case
+                    this.displayGeneratedComic(result);
+                } else {
+                    // Keep polling original ID
+                    setTimeout(() => this.checkResult(predictionId), 5000);
                 }
             },
             error: (xhr) => {
+                console.error('Error checking result:', xhr.status, xhr.responseText);
                 if (xhr.status === 404) {
-                    // Panel file not found, try original prediction
-                    const predictionUrl = this.getApiUrl(`public/temp/${predictionId}.json`);
-                    $.ajax({
-                        url: predictionUrl,
-                        type: 'GET',
-                        dataType: 'json',
-                        success: (predResult) => {
-                            if (predResult.panel_id) {
-                                // Found panel ID, switch to polling that
-                                setTimeout(() => this.checkResult(predResult.panel_id), 5000);
-                            } else {
-                                // Keep polling original ID
-                                setTimeout(() => this.checkResult(predictionId), 5000);
-                            }
-                        },
-                        error: () => {
-                            // On error, keep polling original ID
-                            setTimeout(() => this.checkResult(predictionId), 5000);
-                        }
-                    });
+                    // File not found, keep polling
+                    setTimeout(() => this.checkResult(predictionId), 5000);
                 } else {
                     this.handleGenerationError('Failed to check generation status');
                 }
