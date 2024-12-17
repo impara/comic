@@ -106,20 +106,23 @@ try {
         $pending = json_decode(file_get_contents($pendingFile), true);
 
         if ($pending && isset($pending['prediction_id']) && $pending['prediction_id'] === $predictionId) {
-            $logger->error("TEST_LOG - Found matching cartoonification", [
-                'pending_file' => basename($pendingFile),
-                'prediction_id' => $predictionId,
-                'original_panel_id' => $pending['original_panel_id'] ?? null
-            ]);
-
-            // Get the original panel ID
             $originalPanelId = $pending['original_panel_id'] ?? null;
+            $currentStage = $pending['stage'] ?? 'unknown';
+
             if (!$originalPanelId) {
-                $logger->error("Missing original panel ID in pending file", [
+                $logger->error("Missing original panel ID", [
+                    'prediction_id' => $predictionId,
                     'pending_file' => basename($pendingFile)
                 ]);
                 continue;
             }
+
+            $logger->error("TEST_LOG - Processing webhook", [
+                'prediction_id' => $predictionId,
+                'stage' => $currentStage,
+                'original_panel_id' => $originalPanelId,
+                'status' => $data['status']
+            ]);
 
             // Update the original panel's state file
             $stateFile = $tempPath . "state_{$originalPanelId}.json";
@@ -138,8 +141,13 @@ try {
                 file_put_contents($stateFile, json_encode($state));
             }
 
-            // Store the cartoonification result in the original panel's directory
-            if ($data['status'] === 'succeeded' && !empty($data['output'])) {
+            if ($currentStage === 'cartoonify' && $data['status'] === 'succeeded') {
+                $logger->error("TEST_LOG - Cartoonification succeeded, preparing SDXL", [
+                    'original_panel_id' => $originalPanelId,
+                    'cartoonified_url' => is_array($data['output']) ? $data['output'][0] : $data['output']
+                ]);
+
+                // Store the cartoonification result
                 $cartoonificationResult = [
                     'id' => $predictionId,
                     'status' => 'succeeded',
@@ -155,11 +163,94 @@ try {
                     json_encode($cartoonificationResult)
                 );
 
-                $logger->error("TEST_LOG - Stored cartoonification result", [
-                    'original_panel_id' => $originalPanelId,
+                // Trigger SDXL
+                require_once __DIR__ . '/models/ReplicateClient.php';
+                $replicateClient = new ReplicateClient($logger);
+
+                try {
+                    // Parse panel data
+                    $panelData = json_decode($pending['panel_data'], true);
+                    if (!$panelData) {
+                        throw new Exception("Invalid panel data format");
+                    }
+
+                    $logger->error("TEST_LOG - Starting SDXL generation", [
+                        'original_panel_id' => $originalPanelId,
+                        'scene_description' => $panelData['scene_description'],
+                        'cartoonified_url' => $cartoonificationResult['output']
+                    ]);
+
+                    // Start SDXL generation
+                    $sdxlResult = $replicateClient->generateImage([
+                        'cartoonified_image' => $cartoonificationResult['output'],
+                        'prompt' => $panelData['scene_description'],
+                        'original_panel_id' => $originalPanelId,
+                        'options' => [
+                            'style' => $panelData['characters'][0]['options']['style'] ?? 'modern'
+                        ]
+                    ]);
+
+                    // Create new pending file for SDXL
+                    $sdxlPendingFile = $tempPath . "pending_{$sdxlResult['id']}.json";
+                    file_put_contents($sdxlPendingFile, json_encode([
+                        'prediction_id' => $sdxlResult['id'],
+                        'original_panel_id' => $originalPanelId,
+                        'stage' => 'sdxl',
+                        'cartoonified_url' => $cartoonificationResult['output'],
+                        'started_at' => time(),
+                        'panel_data' => $pending['panel_data'] // Preserve original panel data
+                    ]));
+
+                    // Update state file with SDXL status
+                    if (file_exists($stateFile)) {
+                        $state = json_decode(file_get_contents($stateFile), true);
+                        $state['sdxl_status'] = 'processing';
+                        $state['sdxl_prediction_id'] = $sdxlResult['id'];
+                        $state['sdxl_started_at'] = time();
+                        file_put_contents($stateFile, json_encode($state));
+                    }
+
+                    $logger->error("TEST_LOG - SDXL generation initiated", [
+                        'sdxl_prediction_id' => $sdxlResult['id'],
+                        'original_panel_id' => $originalPanelId
+                    ]);
+                } catch (Exception $e) {
+                    $logger->error("Failed to start SDXL", [
+                        'error' => $e->getMessage(),
+                        'original_panel_id' => $originalPanelId
+                    ]);
+                }
+            } elseif ($currentStage === 'sdxl') {
+                $logger->error("TEST_LOG - Processing SDXL completion", [
                     'prediction_id' => $predictionId,
-                    'output_url' => $cartoonificationResult['output']
+                    'original_panel_id' => $originalPanelId,
+                    'status' => $data['status']
                 ]);
+
+                if ($data['status'] === 'succeeded') {
+                    // Update state file with SDXL completion
+                    if (file_exists($stateFile)) {
+                        $state = json_decode(file_get_contents($stateFile), true);
+                        $state['sdxl_status'] = 'succeeded';
+                        $state['sdxl_output'] = is_array($data['output']) ? $data['output'][0] : $data['output'];
+                        $state['sdxl_completed_at'] = time();
+                        file_put_contents($stateFile, json_encode($state));
+                    }
+
+                    // Write final result to original panel file
+                    $finalResult = [
+                        'id' => $originalPanelId,
+                        'status' => 'succeeded',
+                        'output' => is_array($data['output']) ? $data['output'][0] : $data['output'],
+                        'completed_at' => date('c')
+                    ];
+                    file_put_contents($tempPath . "{$originalPanelId}.json", json_encode($finalResult));
+
+                    $logger->error("TEST_LOG - SDXL completed successfully", [
+                        'original_panel_id' => $originalPanelId,
+                        'output_url' => $finalResult['output']
+                    ]);
+                }
             }
 
             // Clean up the pending file
@@ -167,285 +258,6 @@ try {
             break;
         }
     }
-
-    // Check if this is a final panel generation completion
-    $mappingFiles = glob($tempPath . "mapping_*.json");
-    foreach ($mappingFiles as $mappingFile) {
-        $mapping = json_decode(file_get_contents($mappingFile), true);
-        if ($mapping && isset($mapping['panel_prediction_id']) && $mapping['panel_prediction_id'] === $predictionId) {
-            $logger->error("TEST_LOG - Found matching panel prediction", [
-                'mapping_file' => basename($mappingFile),
-                'original_id' => $mapping['original_prediction_id'],
-                'panel_id' => $predictionId
-            ]);
-
-            if ($data['status'] === 'succeeded' && !empty($data['output'])) {
-                // First try to get original ID from pending files
-                $originalPredictionId = null;
-                $pendingFiles = glob($tempPath . "pending_*.json");
-                foreach ($pendingFiles as $pendingFile) {
-                    $pending = json_decode(file_get_contents($pendingFile), true);
-                    if ($pending && isset($pending['original_prediction_id'])) {
-                        $originalPredictionId = $pending['original_prediction_id'];
-                        $logger->error("TEST_LOG - Found original ID in pending file", [
-                            'pending_file' => basename($pendingFile),
-                            'original_id' => $originalPredictionId
-                        ]);
-                        break;
-                    }
-                }
-
-                // If not found in pending files, try mapping file
-                if (!$originalPredictionId && isset($mapping['original_prediction_id'])) {
-                    $originalPredictionId = $mapping['original_prediction_id'];
-                    $logger->error("TEST_LOG - Using original ID from mapping file", [
-                        'mapping_file' => basename($mappingFile),
-                        'original_id' => $originalPredictionId
-                    ]);
-                }
-
-                // If still not found, check state files
-                if (!$originalPredictionId) {
-                    $stateFiles = glob($tempPath . "state_*.json");
-                    foreach ($stateFiles as $stateFile) {
-                        $state = json_decode(file_get_contents($stateFile), true);
-                        if ($state && isset($state['id'])) {
-                            $originalPredictionId = $state['id'];
-                            $logger->error("TEST_LOG - Found original ID in state file", [
-                                'state_file' => basename($stateFile),
-                                'original_id' => $originalPredictionId
-                            ]);
-                            break;
-                        }
-                    }
-                }
-
-                // If still not found, use panel ID
-                if (!$originalPredictionId) {
-                    $originalPredictionId = $predictionId;
-                    $logger->error("TEST_LOG - Using panel ID as fallback", [
-                        'panel_id' => $predictionId
-                    ]);
-                }
-
-                // Write the final result to the original prediction file
-                $originalResultFile = $tempPath . "{$originalPredictionId}.json";
-
-                // Get cartoonified images from mapping
-                $cartoonifiedImages = $mapping['cartoonified_images'] ?? [];
-
-                $logger->error("TEST_LOG - Verifying cartoonified image usage", [
-                    'panel_id' => $predictionId,
-                    'original_id' => $originalPredictionId,
-                    'cartoonified_images' => $cartoonifiedImages,
-                    'has_output' => !empty($data['output']),
-                    'output_type' => is_array($data['output']) ? 'array' : 'string',
-                    'mapping_data' => $mapping
-                ]);
-
-                // Verify cartoonified images are valid URLs
-                $validCartoonifiedImages = array_filter($cartoonifiedImages, function ($url) {
-                    return filter_var($url, FILTER_VALIDATE_URL) !== false;
-                });
-
-                if (empty($validCartoonifiedImages) && !empty($cartoonifiedImages)) {
-                    $logger->error("Invalid cartoonified image URLs found", [
-                        'invalid_urls' => array_diff($cartoonifiedImages, $validCartoonifiedImages)
-                    ]);
-                }
-
-                file_put_contents($originalResultFile, json_encode([
-                    'id' => $originalPredictionId,
-                    'status' => 'succeeded',
-                    'type' => 'panel',
-                    'output' => is_array($data['output']) ? $data['output'][0] : $data['output'],
-                    'completed_at' => date('c'),
-                    'cartoonified_images' => $validCartoonifiedImages,
-                    'debug_info' => [
-                        'used_cartoonified_images' => $validCartoonifiedImages,
-                        'panel_id' => $predictionId,
-                        'original_id' => $originalPredictionId,
-                        'cartoonification_status' => [
-                            'total_images' => count($cartoonifiedImages),
-                            'valid_images' => count($validCartoonifiedImages),
-                            'timestamp' => date('c')
-                        ]
-                    ]
-                ]));
-
-                $logger->info("Final panel result written to original prediction file", [
-                    'original_file' => $originalResultFile,
-                    'original_id' => $originalPredictionId,
-                    'panel_output' => $data['output'],
-                    'debug_info' => [
-                        'used_cartoonified_images' => $validCartoonifiedImages
-                    ]
-                ]);
-
-                // Clean up the mapping file
-                @unlink($mappingFile);
-                return;
-            } elseif ($data['status'] === 'failed') {
-                // First try to get original ID from pending files
-                $originalPredictionId = null;
-                $pendingFiles = glob($tempPath . "pending_*.json");
-                foreach ($pendingFiles as $pendingFile) {
-                    $pending = json_decode(file_get_contents($pendingFile), true);
-                    if ($pending && isset($pending['original_prediction_id'])) {
-                        $originalPredictionId = $pending['original_prediction_id'];
-                        break;
-                    }
-                }
-
-                // If not found in pending files, try mapping file
-                if (!$originalPredictionId) {
-                    $originalPredictionId = $mapping['original_prediction_id'];
-                }
-
-                // If still not found, use panel ID
-                if (!$originalPredictionId) {
-                    $originalPredictionId = $predictionId;
-                }
-
-                $originalResultFile = $tempPath . "{$originalPredictionId}.json";
-
-                file_put_contents($originalResultFile, json_encode([
-                    'id' => $originalPredictionId,
-                    'status' => 'failed',
-                    'error' => $data['error'] ?? 'Panel generation failed',
-                    'type' => 'panel',
-                    'completed_at' => date('c')
-                ]));
-
-                $logger->error("Panel generation failed", [
-                    'error' => $data['error'] ?? 'Unknown error',
-                    'original_id' => $originalPredictionId,
-                    'panel_id' => $predictionId
-                ]);
-
-                // Clean up the mapping file
-                @unlink($mappingFile);
-                return;
-            }
-            break;
-        }
-    }
-
-    // Handle the webhook payload
-    if ($data['status'] === 'succeeded') {
-        // Get the pending file
-        $pendingFile = $tempPath . "pending_{$data['id']}.json";
-        if (file_exists($pendingFile)) {
-            $pending = json_decode(file_get_contents($pendingFile), true);
-
-            // Check which stage we're in
-            if ($pending['stage'] === 'cartoonify' && $pending['next_stage'] === 'sdxl') {
-                // Log the transition
-                $logger->error("TEST_LOG - Transitioning from cartoonify to SDXL", [
-                    'prediction_id' => $data['id'],
-                    'original_prediction_id' => $pending['original_prediction_id'],
-                    'pending_data' => $pending
-                ]);
-
-                // Cartoonification completed, now start SDXL
-                $cartoonifiedUrl = is_array($data['output']) ? $data['output'][0] : $data['output'];
-
-                // Get the stored SDXL parameters
-                $sdxlParams = $pending['sdxl_params'];
-                $sdxlParams['model_params']['image'] = $cartoonifiedUrl;
-
-                // Start SDXL processing
-                require_once __DIR__ . '/models/ReplicateClient.php';
-                $replicateClient = new ReplicateClient($logger);
-
-                $result = $replicateClient->generateImage([
-                    'cartoonified_image' => $cartoonifiedUrl,
-                    'prompt' => $sdxlParams['prompt'],
-                    'options' => ['style' => $sdxlParams['style']],
-                    'original_prediction_id' => $pending['original_prediction_id']
-                ]);
-
-                // Create mapping file for SDXL stage
-                $mappingFile = $tempPath . "mapping_{$result['id']}.json";
-                file_put_contents($mappingFile, json_encode([
-                    'original_prediction_id' => $pending['original_prediction_id'],
-                    'panel_prediction_id' => $result['id'],
-                    'cartoonified_images' => [$cartoonifiedUrl],
-                    'created_at' => date('c')
-                ]));
-
-                // Create new pending file for SDXL stage
-                $newPendingFile = $tempPath . "pending_{$result['id']}.json";
-                file_put_contents($newPendingFile, json_encode([
-                    'prediction_id' => $result['id'],
-                    'stage' => 'sdxl',
-                    'original_prediction_id' => $pending['original_prediction_id'],
-                    'cartoonified_url' => $cartoonifiedUrl,
-                    'started_at' => time(),
-                    'debug_info' => [
-                        'previous_stage' => 'cartoonify',
-                        'previous_id' => $data['id'],
-                        'cartoonified_url' => $cartoonifiedUrl
-                    ]
-                ]));
-
-                // Log the SDXL stage initialization
-                $logger->error("TEST_LOG - Initialized SDXL stage", [
-                    'sdxl_prediction_id' => $result['id'],
-                    'original_prediction_id' => $pending['original_prediction_id'],
-                    'cartoonified_url' => $cartoonifiedUrl,
-                    'mapping_file' => basename($mappingFile),
-                    'pending_file' => basename($newPendingFile)
-                ]);
-
-                // Clean up old pending file
-                @unlink($pendingFile);
-                return;
-            } else if ($pending['stage'] === 'sdxl') {
-                // SDXL completed, this is our final result
-                $finalResult = [
-                    'id' => $pending['original_prediction_id'],
-                    'status' => 'succeeded',
-                    'output' => is_array($data['output']) ? $data['output'][0] : $data['output'],
-                    'completed_at' => date('c'),
-                    'cartoonified_url' => $pending['cartoonified_url']
-                ];
-
-                // Write final result
-                $resultFile = $tempPath . "{$pending['original_prediction_id']}.json";
-                file_put_contents($resultFile, json_encode($finalResult));
-
-                // Log the completion
-                $logger->error("TEST_LOG - SDXL stage completed", [
-                    'prediction_id' => $data['id'],
-                    'original_prediction_id' => $pending['original_prediction_id'],
-                    'result_file' => basename($resultFile)
-                ]);
-
-                // Clean up pending file
-                @unlink($pendingFile);
-                return;
-            }
-        }
-    }
-
-    // If we get here, this is an unknown prediction - store it as-is
-    $writeResult = file_put_contents($tempFile, $payload);
-    if ($writeResult === false) {
-        $error = error_get_last();
-        $logger->error("Failed to write prediction result", [
-            'file' => $tempFile,
-            'error' => $error['message'] ?? 'Unknown error',
-            'php_error' => error_get_last()
-        ]);
-        throw new Exception("Failed to write prediction result: " . ($error['message'] ?? 'Unknown error'));
-    }
-
-    $logger->info("Stored unknown prediction result", [
-        'file' => $tempFile,
-        'prediction_id' => $predictionId,
-        'bytes_written' => $writeResult
-    ]);
 
     // Return success response
     http_response_code(200);
