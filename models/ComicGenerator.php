@@ -92,7 +92,6 @@ class ComicGenerator
                     $idMapping = json_decode(file_get_contents($idMappingFile), true);
                     $idMapping['related_predictions'][] = [
                         'prediction_id' => $cartoonificationResult['id'],
-                        'type' => 'cartoonification',
                         'character_id' => $character['id'],
                         'created_at' => time()
                     ];
@@ -105,20 +104,20 @@ class ComicGenerator
                         $characterImages[] = $cartoonificationResult['output'];
                     } else {
                         // Handle async cartoonification
-                        $pendingCartoonifications[] = $cartoonificationResult['id'];
+                        $pendingCartoonifications[] = $cartoonificationResult['id'];  // Store Replicate prediction ID instead of character ID
 
                         // Create pending file for webhook processing
                         $pendingFile = $this->config->getTempPath() . "pending_{$cartoonificationResult['id']}.json";
                         file_put_contents($pendingFile, json_encode([
                             'prediction_id' => $cartoonificationResult['id'],
-                            'original_panel_id' => $panelId,  // Ensure this is always set
-                            'stage' => 'cartoonify',          // Add stage information
-                            'next_stage' => 'sdxl',           // Add next stage
+                            'original_panel_id' => $panelId,
+                            'stage' => 'cartoonify',
+                            'next_stage' => 'sdxl',
                             'character_id' => $character['id'],
                             'panel_data' => json_encode([
                                 'characters' => [$character],
                                 'scene_description' => $sceneDescription,
-                                'original_panel_id' => $panelId  // Redundant but safe
+                                'original_panel_id' => $panelId
                             ]),
                             'state_file' => basename($stateFile),
                             'started_at' => time()
@@ -127,13 +126,21 @@ class ComicGenerator
                         // Update state file with pending cartoonification
                         $state = json_decode(file_get_contents($stateFile), true);
                         $state['cartoonification_requests'][] = [
-                            'prediction_id' => $cartoonificationResult['id'],
-                            'character_id' => $character['id'],
+                            'prediction_id' => $cartoonificationResult['id'],  // Store Replicate prediction ID
+                            'character_id' => $character['id'],                // Keep character ID for reference
                             'status' => 'pending',
                             'started_at' => time(),
-                            'original_panel_id' => $panelId // Add original panel ID reference
+                            'original_panel_id' => $panelId
                         ];
                         file_put_contents($stateFile, json_encode($state));
+
+                        // Log the prediction mapping
+                        $this->logger->error("TEST_LOG - Created prediction mapping", [
+                            'prediction_id' => $cartoonificationResult['id'],
+                            'character_id' => $character['id'],
+                            'original_panel_id' => $panelId,
+                            'pending_file' => basename($pendingFile)
+                        ]);
                     }
                 } catch (Exception $e) {
                     $this->logger->error("Failed to process character", [

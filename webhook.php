@@ -102,8 +102,22 @@ try {
 
     // If not SDXL, check for cartoonification completion
     $pendingFiles = glob($tempPath . "pending_*.json");
+
+    $logger->error("TEST_LOG - Searching for pending file", [
+        'prediction_id' => $predictionId,
+        'pending_files' => array_map('basename', $pendingFiles)
+    ]);
+
     foreach ($pendingFiles as $pendingFile) {
         $pending = json_decode(file_get_contents($pendingFile), true);
+
+        // Verify pending file contents
+        $logger->error("TEST_LOG - Checking pending file", [
+            'file' => basename($pendingFile),
+            'prediction_id_matches' => ($pending['prediction_id'] ?? null) === $predictionId,
+            'has_original_panel_id' => isset($pending['original_panel_id']),
+            'stage' => $pending['stage'] ?? 'unknown'
+        ]);
 
         if ($pending && isset($pending['prediction_id']) && $pending['prediction_id'] === $predictionId) {
             $originalPanelId = $pending['original_panel_id'] ?? null;
@@ -128,6 +142,11 @@ try {
             $stateFile = $tempPath . "state_{$originalPanelId}.json";
             if (file_exists($stateFile)) {
                 $state = json_decode(file_get_contents($stateFile), true);
+                $logger->error("TEST_LOG - Current state", [
+                    'state_file' => basename($stateFile),
+                    'cartoonification_requests' => $state['cartoonification_requests'] ?? []
+                ]);
+
                 foreach ($state['cartoonification_requests'] ?? [] as &$request) {
                     if ($request['prediction_id'] === $predictionId) {
                         $request['status'] = $data['status'];
@@ -212,12 +231,14 @@ try {
 
                     $logger->error("TEST_LOG - SDXL generation initiated", [
                         'sdxl_prediction_id' => $sdxlResult['id'],
-                        'original_panel_id' => $originalPanelId
+                        'original_panel_id' => $originalPanelId,
+                        'pending_file' => basename($sdxlPendingFile)
                     ]);
                 } catch (Exception $e) {
                     $logger->error("Failed to start SDXL", [
                         'error' => $e->getMessage(),
-                        'original_panel_id' => $originalPanelId
+                        'original_panel_id' => $originalPanelId,
+                        'trace' => $e->getTraceAsString()
                     ]);
                 }
             } elseif ($currentStage === 'sdxl') {
