@@ -81,18 +81,19 @@ try {
                 $panel['completed_at'] = date('c');
                 file_put_contents($panelFile, json_encode($panel));
 
+                // Also update the original panel's state file if it exists
+                $stateFile = $tempPath . "state_" . basename($panelFile);
+                if (file_exists($stateFile)) {
+                    $state = json_decode(file_get_contents($stateFile), true);
+                    $state['sdxl_status'] = 'succeeded';
+                    $state['sdxl_output'] = $panel['output'];
+                    $state['sdxl_completed_at'] = date('c');
+                    file_put_contents($stateFile, json_encode($state));
+                }
+
                 $logger->error("TEST_LOG - Updated panel with SDXL output", [
                     'panel_id' => basename($panelFile, '.json'),
                     'output_url' => $panel['output']
-                ]);
-            } else if ($data['status'] === 'failed') {
-                $panel['status'] = 'failed';
-                $panel['error'] = $data['error'] ?? 'SDXL generation failed';
-                file_put_contents($panelFile, json_encode($panel));
-
-                $logger->error("TEST_LOG - SDXL generation failed", [
-                    'panel_id' => basename($panelFile, '.json'),
-                    'error' => $panel['error']
                 ]);
             }
             return;
@@ -101,264 +102,68 @@ try {
 
     // If not SDXL, check for cartoonification completion
     $pendingFiles = glob($tempPath . "pending_*.json");
-
-    // Clean up stale pending files (older than 1 hour)
     foreach ($pendingFiles as $pendingFile) {
         $pending = json_decode(file_get_contents($pendingFile), true);
-        if ($pending && isset($pending['started_at'])) {
-            $age = time() - $pending['started_at'];
-            if ($age > 3600) { // 1 hour
-                $logger->error("TEST_LOG - Removing stale pending file", [
-                    'file' => basename($pendingFile),
-                    'age_seconds' => $age,
-                    'started_at' => $pending['started_at']
-                ]);
-                @unlink($pendingFile);
-                continue;
-            }
-        }
-    }
-
-    // Refresh pending files list after cleanup
-    $pendingFiles = glob($tempPath . "pending_*.json");
-    $logger->error("TEST_LOG - Searching pending files", [
-        'found_files' => count($pendingFiles),
-        'prediction_id' => $predictionId,
-        'pending_files' => array_map(function ($f) {
-            return basename($f);
-        }, $pendingFiles),
-        'webhook_status' => $data['status'],
-        'has_output' => !empty($data['output']),
-        'output_type' => !empty($data['output']) ? (is_array($data['output']) ? 'array' : 'string') : 'none'
-    ]);
-
-    foreach ($pendingFiles as $pendingFile) {
-        $pending = json_decode(file_get_contents($pendingFile), true);
-        $logger->error("TEST_LOG - Checking pending file", [
-            'file' => basename($pendingFile),
-            'has_prediction_id' => isset($pending['prediction_id']),
-            'pending_prediction_id' => $pending['prediction_id'] ?? 'none',
-            'matches_current' => ($pending['prediction_id'] ?? '') === $predictionId,
-            'has_panel_data' => isset($pending['panel_data']),
-            'has_state_file' => isset($pending['state_file']),
-            'raw_pending' => $pending
-        ]);
 
         if ($pending && isset($pending['prediction_id']) && $pending['prediction_id'] === $predictionId) {
             $logger->error("TEST_LOG - Found matching cartoonification", [
                 'pending_file' => basename($pendingFile),
                 'prediction_id' => $predictionId,
-                'has_panel_data' => isset($pending['panel_data']),
-                'state_file' => $pending['state_file'] ?? null
+                'original_panel_id' => $pending['original_panel_id'] ?? null
             ]);
 
-            // Update state file if it exists
-            if (isset($pending['state_file'])) {
-                $stateFile = $tempPath . $pending['state_file'];
-                if (file_exists($stateFile)) {
-                    $state = json_decode(file_get_contents($stateFile), true) ?? [];
-                    foreach ($state['cartoonification_requests'] ?? [] as &$request) {
-                        if ($request['prediction_id'] === $predictionId) {
-                            $request['status'] = $data['status'];
-                            $request['completed_at'] = time();
-                            if ($data['status'] === 'succeeded') {
-                                $request['output'] = is_array($data['output']) ? $data['output'][0] : $data['output'];
-                            } elseif ($data['status'] === 'failed') {
-                                $request['error'] = $data['error'] ?? 'Unknown error';
-                            }
-                            break;
-                        }
-                    }
-                    file_put_contents($stateFile, json_encode($state));
-                }
+            // Get the original panel ID
+            $originalPanelId = $pending['original_panel_id'] ?? null;
+            if (!$originalPanelId) {
+                $logger->error("Missing original panel ID in pending file", [
+                    'pending_file' => basename($pendingFile)
+                ]);
+                continue;
             }
 
-            // Store the result directly
-            if ($data['status'] === 'succeeded' && !empty($data['output'])) {
-                $logger->error("TEST_LOG - Cartoonification succeeded", [
-                    'output_url' => is_array($data['output']) ? $data['output'][0] : $data['output'],
-                    'has_panel_data' => isset($pending['panel_data']),
-                    'panel_data_type' => isset($pending['panel_data']) ? gettype($pending['panel_data']) : 'none'
-                ]);
+            // Update the original panel's state file
+            $stateFile = $tempPath . "state_{$originalPanelId}.json";
+            if (file_exists($stateFile)) {
+                $state = json_decode(file_get_contents($stateFile), true);
+                foreach ($state['cartoonification_requests'] ?? [] as &$request) {
+                    if ($request['prediction_id'] === $predictionId) {
+                        $request['status'] = $data['status'];
+                        $request['completed_at'] = time();
+                        if ($data['status'] === 'succeeded') {
+                            $request['output'] = is_array($data['output']) ? $data['output'][0] : $data['output'];
+                        }
+                        break;
+                    }
+                }
+                file_put_contents($stateFile, json_encode($state));
+            }
 
-                // Store cartoonification result
+            // Store the cartoonification result in the original panel's directory
+            if ($data['status'] === 'succeeded' && !empty($data['output'])) {
                 $cartoonificationResult = [
                     'id' => $predictionId,
                     'status' => 'succeeded',
                     'type' => 'cartoonification',
                     'output' => is_array($data['output']) ? $data['output'][0] : $data['output'],
                     'completed_at' => date('c'),
-                    'original_prediction_id' => $pending['original_prediction_id'] ?? null,
-                    'debug_info' => [
-                        'pending_file' => basename($pendingFile),
-                        'has_panel_data' => isset($pending['panel_data']),
-                        'original_prediction_id' => $pending['original_prediction_id'] ?? null
-                    ]
+                    'original_panel_id' => $originalPanelId
                 ];
 
-                $logger->error("TEST_LOG - Writing cartoonification result", [
+                // Store result in original panel's directory
+                file_put_contents(
+                    $tempPath . "{$originalPanelId}_cartoonify_{$predictionId}.json",
+                    json_encode($cartoonificationResult)
+                );
+
+                $logger->error("TEST_LOG - Stored cartoonification result", [
+                    'original_panel_id' => $originalPanelId,
                     'prediction_id' => $predictionId,
-                    'original_prediction_id' => $pending['original_prediction_id'] ?? null,
-                    'has_panel_data' => isset($pending['panel_data']),
-                    'output_url' => is_array($data['output']) ? $data['output'][0] : $data['output']
+                    'output_url' => $cartoonificationResult['output']
                 ]);
-
-                file_put_contents($tempPath . "{$predictionId}.json", json_encode($cartoonificationResult));
-
-                // If this is a cartoonification completion, trigger panel generation
-                if (isset($pending['panel_data'])) {
-                    $panelData = json_decode($pending['panel_data'], true);
-                    if ($panelData === null) {
-                        $logger->error("Failed to parse panel_data JSON", [
-                            'panel_data' => $pending['panel_data'],
-                            'json_error' => json_last_error_msg()
-                        ]);
-                        throw new Exception("Invalid panel_data format");
-                    }
-
-                    // Update cartoonified_image for the character(s)
-                    $cartoonifiedUrl = is_array($data['output']) ? $data['output'][0] : $data['output'];
-
-                    // Log the original panel data before update
-                    $logger->error("TEST_LOG - Panel data before cartoonified update", [
-                        'character_id' => $panelData['characters'][0]['id'],
-                        'has_cartoonified' => isset($panelData['characters'][0]['cartoonified_image']),
-                        'original_image' => $panelData['characters'][0]['image'],
-                        'scene_description' => $panelData['scene_description']
-                    ]);
-
-                    // Update character's cartoonified image
-                    $panelData['characters'][0]['cartoonified_image'] = $cartoonifiedUrl;
-
-                    // Store cartoonification mapping for verification
-                    $cartoonificationMappingFile = $tempPath . "cartoonification_{$predictionId}.json";
-                    file_put_contents($cartoonificationMappingFile, json_encode([
-                        'prediction_id' => $predictionId,
-                        'character_id' => $panelData['characters'][0]['id'],
-                        'cartoonified_url' => $cartoonifiedUrl,
-                        'original_prediction_id' => $pending['original_prediction_id'],
-                        'created_at' => date('c')
-                    ]));
-
-                    // Update state file with cartoonified image
-                    if (isset($pending['state_file'])) {
-                        $stateFile = $tempPath . $pending['state_file'];
-                        if (file_exists($stateFile)) {
-                            $state = json_decode(file_get_contents($stateFile), true) ?? [];
-                            foreach ($state['cartoonification_requests'] ?? [] as &$request) {
-                                if ($request['prediction_id'] === $predictionId) {
-                                    $request['status'] = 'succeeded';
-                                    $request['completed_at'] = time();
-                                    $request['cartoonified_url'] = $cartoonifiedUrl;
-                                    break;
-                                }
-                            }
-                            file_put_contents($stateFile, json_encode($state));
-                        }
-                    }
-
-                    // Log the updated panel data before generating panel
-                    $logger->error("TEST_LOG - Updated panel data with cartoonified image", [
-                        'character_id' => $panelData['characters'][0]['id'],
-                        'cartoonified_url' => $cartoonifiedUrl,
-                        'scene_description' => $panelData['scene_description'],
-                        'full_panel_data' => $panelData,
-                        'original_pending_file' => basename($pendingFile),
-                        'cartoonification_mapping' => basename($cartoonificationMappingFile),
-                        'state_file' => $pending['state_file'] ?? null
-                    ]);
-
-                    // Now call generatePanel() with updated panelData
-                    require_once __DIR__ . '/models/ComicGenerator.php';
-                    require_once __DIR__ . '/models/ReplicateClient.php';
-
-                    $comicGenerator = new ComicGenerator($logger);
-                    $replicateClient = new ReplicateClient($logger);
-
-                    // First generate panel ID and state
-                    $panelResult = $comicGenerator->generatePanel(
-                        $panelData['characters'],
-                        $panelData['scene_description'],
-                        $pending['original_prediction_id']
-                    );
-
-                    $logger->error("TEST_LOG - Panel generation completed after cartoonification", [
-                        'result' => $panelResult,
-                        'panel_id' => $panelResult['id']
-                    ]);
-
-                    // Store panel info in original prediction file for frontend access
-                    $originalPredictionFile = $tempPath . $pending['original_prediction_id'] . '.json';
-                    $originalPrediction = [];
-                    if (file_exists($originalPredictionFile)) {
-                        $originalPrediction = json_decode(file_get_contents($originalPredictionFile), true) ?? [];
-                    }
-                    $originalPrediction['panel_id'] = $panelResult['id'];
-                    $originalPrediction['status'] = 'processing';
-                    file_put_contents($originalPredictionFile, json_encode($originalPrediction));
-
-                    // Now trigger SDXL with cartoonified image
-                    try {
-                        // Prepare SDXL parameters
-                        $sdxlParams = [
-                            'cartoonified_image' => $cartoonifiedUrl,
-                            'prompt' => $panelData['scene_description'],
-                            'options' => [
-                                'style' => $panelData['characters'][0]['options']['style'] ?? 'modern'
-                            ],
-                            'original_prediction_id' => $panelResult['id']
-                        ];
-
-                        // Call SDXL generation
-                        $sdxlResult = $replicateClient->generateImage($sdxlParams);
-
-                        // Update panel file with SDXL prediction ID
-                        $panelFile = $tempPath . $panelResult['id'] . '.json';
-                        $currentPanel = [
-                            'id' => $panelResult['id'],
-                            'status' => 'processing',
-                            'sdxl_prediction_id' => $sdxlResult['id'],
-                            'cartoonified_url' => $cartoonifiedUrl,
-                            'original_prediction_id' => $pending['original_prediction_id'],
-                            'created_at' => date('c')
-                        ];
-                        file_put_contents($panelFile, json_encode($currentPanel));
-
-                        $logger->error("TEST_LOG - SDXL generation initiated", [
-                            'panel_id' => $panelResult['id'],
-                            'sdxl_prediction_id' => $sdxlResult['id'],
-                            'cartoonified_url' => $cartoonifiedUrl
-                        ]);
-                    } catch (Exception $e) {
-                        $logger->error("Failed to initiate SDXL generation", [
-                            'error' => $e->getMessage(),
-                            'panel_id' => $panelResult['id']
-                        ]);
-                        throw $e;
-                    }
-
-                    // Store the mapping between cartoonification and panel
-                    if (isset($panelResult['id'])) {
-                        $mappingFile = $tempPath . "mapping_{$panelResult['id']}.json";
-                        file_put_contents($mappingFile, json_encode([
-                            'original_prediction_id' => $pending['original_prediction_id'],
-                            'panel_prediction_id' => $panelResult['id'],
-                            'cartoonified_images' => [$cartoonifiedUrl],
-                            'created_at' => date('c')
-                        ]));
-                    }
-
-                    // Clean up the pending file since we're done with cartoonification
-                    @unlink($pendingFile);
-                    return;
-                }
-            } elseif ($data['status'] === 'failed') {
-                $logger->error("TEST_LOG - Cartoonification failed", [
-                    'error' => $data['error'] ?? 'Unknown error',
-                    'prediction_id' => $predictionId
-                ]);
-                @unlink($pendingFile);
             }
+
+            // Clean up the pending file
+            @unlink($pendingFile);
             break;
         }
     }

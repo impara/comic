@@ -37,13 +37,22 @@ class ComicGenerator
         ]);
 
         try {
-            // Create a unique ID for this panel if not provided
+            // Always use the provided ID or generate a new one, but store it consistently
             $panelId = $originalPredictionId ?: 'panel_' . uniqid('', true);
+
+            // Store the original panel ID in a mapping file for reference
+            $idMappingFile = $this->config->getTempPath() . "id_mapping_{$panelId}.json";
+            file_put_contents($idMappingFile, json_encode([
+                'panel_id' => $panelId,
+                'created_at' => time(),
+                'related_predictions' => []
+            ]));
 
             // Create state file for tracking
             $stateFile = $this->config->getTempPath() . "state_{$panelId}.json";
             file_put_contents($stateFile, json_encode([
                 'id' => $panelId,
+                'original_panel_id' => $panelId, // Always store the original ID
                 'status' => 'initializing',
                 'started_at' => time(),
                 'cartoonification_requests' => []
@@ -66,17 +75,28 @@ class ComicGenerator
                         'status' => 'succeeded',
                         'cartoonified_url' => $character['cartoonified_image'],
                         'started_at' => time(),
-                        'completed_at' => time()
+                        'completed_at' => time(),
+                        'original_panel_id' => $panelId // Add original panel ID reference
                     ];
                     file_put_contents($stateFile, json_encode($state));
 
                     continue;
                 }
 
-                // Otherwise process the character for cartoonification
+                // Process the character for cartoonification
                 try {
                     // Start cartoonification process
                     $cartoonificationResult = $this->characterProcessor->processCharacter($character);
+
+                    // Update ID mapping with new prediction
+                    $idMapping = json_decode(file_get_contents($idMappingFile), true);
+                    $idMapping['related_predictions'][] = [
+                        'prediction_id' => $cartoonificationResult['id'],
+                        'type' => 'cartoonification',
+                        'character_id' => $character['id'],
+                        'created_at' => time()
+                    ];
+                    file_put_contents($idMappingFile, json_encode($idMapping));
 
                     if (isset($cartoonificationResult['output'])) {
                         // If cartoonification completed synchronously
@@ -91,11 +111,12 @@ class ComicGenerator
                         $pendingFile = $this->config->getTempPath() . "pending_{$cartoonificationResult['id']}.json";
                         file_put_contents($pendingFile, json_encode([
                             'prediction_id' => $cartoonificationResult['id'],
-                            'original_prediction_id' => $panelId,
+                            'original_panel_id' => $panelId, // Always use original panel ID
                             'character_id' => $character['id'],
                             'panel_data' => json_encode([
                                 'characters' => [$character],
-                                'scene_description' => $sceneDescription
+                                'scene_description' => $sceneDescription,
+                                'original_panel_id' => $panelId // Include in panel data
                             ]),
                             'state_file' => basename($stateFile),
                             'started_at' => time()
@@ -107,23 +128,25 @@ class ComicGenerator
                             'prediction_id' => $cartoonificationResult['id'],
                             'character_id' => $character['id'],
                             'status' => 'pending',
-                            'started_at' => time()
+                            'started_at' => time(),
+                            'original_panel_id' => $panelId // Add original panel ID reference
                         ];
                         file_put_contents($stateFile, json_encode($state));
                     }
                 } catch (Exception $e) {
                     $this->logger->error("Failed to process character", [
                         'character_id' => $character['id'],
+                        'original_panel_id' => $panelId,
                         'error' => $e->getMessage()
                     ]);
                     throw $e;
                 }
             }
 
-            // Return result with pending predictions if any
+            // Return result with consistent ID usage
             return [
                 'id' => $panelId,
-                'original_prediction_id' => $panelId,  // Always include original ID
+                'original_panel_id' => $panelId,
                 'status' => count($pendingCartoonifications) > 0 ? 'pending' : 'processing',
                 'pending_predictions' => $pendingCartoonifications,
                 'state_file' => basename($stateFile)
@@ -131,7 +154,8 @@ class ComicGenerator
         } catch (Exception $e) {
             $this->logger->error("Failed to generate panel", [
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'trace' => $e->getTraceAsString(),
+                'original_panel_id' => $panelId ?? null
             ]);
             throw $e;
         }
