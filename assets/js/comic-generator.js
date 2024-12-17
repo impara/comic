@@ -248,6 +248,10 @@ export const ComicGenerator = {
         const stateUrl = this.getApiUrl(`public/temp/state_${panelId}.json`);
         console.log('Checking state file:', stateUrl);
 
+        // Get the final panel URL
+        const panelUrl = this.getApiUrl(`public/temp/${panelId}.json`);
+        console.log('Final panel URL:', panelUrl);
+
         // Clear any existing polling interval
         if (this.pollingInterval) {
             clearInterval(this.pollingInterval);
@@ -300,13 +304,20 @@ export const ComicGenerator = {
                             <p>Panel ID: ${panelId}</p>
                         `);
 
-                        // Display the final image
-                        if (state.sdxl_output) {
-                            $('.comic-preview').html(`<img src="${state.sdxl_output}" class="img-fluid mb-4" alt="Generated Comic">`);
-                            UIManager.showCompletionState();
-                        } else {
-                            this.handleGenerationError('Missing final image in successful state');
-                        }
+                        // Get the final result
+                        $.ajax({
+                            url: panelUrl,
+                            type: 'GET',
+                            dataType: 'json',
+                            success: (result) => {
+                                console.log('Final result received:', result);
+                                this.handleFinalResult(result);
+                            },
+                            error: (xhr, status, error) => {
+                                console.error('Error getting final result:', error);
+                                this.handleGenerationError('Failed to get final result');
+                            }
+                        });
                     } else if (state.status === 'failed' || state.sdxl_status === 'failed') {
                         // Handle failure state
                         clearInterval(this.pollingInterval);
@@ -404,6 +415,35 @@ export const ComicGenerator = {
         }, 5 * 60 * 1000);
     },
 
+    handleFinalResult(result) {
+        try {
+            if (result && result.output) {
+                // First hide generating state with callback
+                UIManager.hideGeneratingState(() => {
+                    // First show completion state to make the container visible
+                    try {
+                        UIManager.showCompletionState();
+                    } catch (e) {
+                        console.error('Error showing completion state:', e);
+                        // Fallback to direct DOM manipulation if UI Manager fails
+                        $('#completionStatus').show();
+                    }
+
+                    // Short delay to ensure container is visible
+                    setTimeout(() => {
+                        // Then set the image
+                        $('.comic-preview').html(`<img src="${result.output}" class="img-fluid mb-4" alt="Generated Comic">`);
+                    }, 100);
+                });
+            } else {
+                this.handleGenerationError('Missing final image in result');
+            }
+        } catch (e) {
+            console.error('Error in handleFinalResult:', e);
+            this.handleGenerationError('Error displaying final result');
+        }
+    },
+
     handleGenerationError(error) {
         if (this.pollingInterval) {
             clearInterval(this.pollingInterval);
@@ -412,6 +452,9 @@ export const ComicGenerator = {
 
         console.error('Generation error:', error);
         $('#debugInfo').html(`<p class="text-danger">Error: ${error}</p>`);
+
+        // Hide generating state and show error
+        $('#generatingStatus').hide();
         UIManager.showGenerateButton();
         $('.progress-bar').css('width', '0%');
     }

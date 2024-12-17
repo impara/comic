@@ -82,11 +82,27 @@ export const UIManager = {
     },
 
     hideGeneratingState(callback) {
-        $('#generatingStatus').fadeOut(400, callback);
+        $('#generatingStatus').fadeOut(400, () => {
+            if (typeof callback === 'function') {
+                callback();
+            }
+        });
     },
 
     showCompletionState() {
-        $('#completionStatus').fadeIn(400);
+        try {
+            // Show completion state with animation
+            $('#completionStatus').fadeIn(400);
+        } catch (e) {
+            console.error('Error in showCompletionState:', e);
+            // Fallback to direct show without animation
+            $('#completionStatus').show();
+        }
+    },
+
+    showGenerateButton() {
+        $('#generatingStatus').hide();
+        $('#generateButton').prop('disabled', false).show();
     },
 
     updatePreview(formHandler) {
