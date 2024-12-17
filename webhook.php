@@ -63,19 +63,43 @@ try {
     // Store the prediction result
     $predictionId = $data['id'];
     $tempPath = $config->getTempPath();
-    $tempFile = $tempPath . "{$predictionId}.json";
 
-    // Log temp directory details
-    $logger->info("Temp directory details", [
-        'path' => $tempPath,
-        'exists' => file_exists($tempPath),
-        'writable' => is_writable($tempPath),
-        'owner' => function_exists('posix_getpwuid') ? posix_getpwuid(fileowner($tempPath))['name'] : 'unknown',
-        'group' => function_exists('posix_getgrgid') ? posix_getgrgid(filegroup($tempPath))['name'] : 'unknown',
-        'permissions' => substr(sprintf('%o', fileperms($tempPath)), -4)
-    ]);
+    // First check if this is an SDXL completion by looking for panel files
+    $panelFiles = glob($tempPath . "panel_*.json");
+    foreach ($panelFiles as $panelFile) {
+        $panel = json_decode(file_get_contents($panelFile), true);
+        if (isset($panel['sdxl_prediction_id']) && $panel['sdxl_prediction_id'] === $predictionId) {
+            $logger->error("TEST_LOG - Found matching SDXL completion", [
+                'panel_id' => basename($panelFile, '.json'),
+                'sdxl_prediction_id' => $predictionId
+            ]);
 
-    // Check if this is a cartoonification completion
+            if ($data['status'] === 'succeeded' && !empty($data['output'])) {
+                // Update panel with final output
+                $panel['status'] = 'succeeded';
+                $panel['output'] = is_array($data['output']) ? $data['output'][0] : $data['output'];
+                $panel['completed_at'] = date('c');
+                file_put_contents($panelFile, json_encode($panel));
+
+                $logger->error("TEST_LOG - Updated panel with SDXL output", [
+                    'panel_id' => basename($panelFile, '.json'),
+                    'output_url' => $panel['output']
+                ]);
+            } else if ($data['status'] === 'failed') {
+                $panel['status'] = 'failed';
+                $panel['error'] = $data['error'] ?? 'SDXL generation failed';
+                file_put_contents($panelFile, json_encode($panel));
+
+                $logger->error("TEST_LOG - SDXL generation failed", [
+                    'panel_id' => basename($panelFile, '.json'),
+                    'error' => $panel['error']
+                ]);
+            }
+            return;
+        }
+    }
+
+    // If not SDXL, check for cartoonification completion
     $pendingFiles = glob($tempPath . "pending_*.json");
 
     // Clean up stale pending files (older than 1 hour)
@@ -246,28 +270,56 @@ try {
 
                     // Now call generatePanel() with updated panelData
                     require_once __DIR__ . '/models/ComicGenerator.php';
+                    require_once __DIR__ . '/models/ReplicateClient.php';
+
                     $comicGenerator = new ComicGenerator($logger);
+                    $replicateClient = new ReplicateClient($logger);
 
-                    $logger->error("TEST_LOG - Calling generatePanel with cartoonified character", [
-                        'character_count' => count($panelData['characters']),
-                        'first_character' => [
-                            'id' => $panelData['characters'][0]['id'] ?? 'unknown',
-                            'has_cartoonified' => isset($panelData['characters'][0]['cartoonified_image']),
-                            'cartoonified_url' => $panelData['characters'][0]['cartoonified_image'] ?? null,
-                            'original_image' => $panelData['characters'][0]['image'],
-                            'is_replicate_url' => isset($panelData['characters'][0]['cartoonified_image']) &&
-                                strpos($panelData['characters'][0]['cartoonified_image'], 'replicate.delivery') !== false
-                        ],
-                        'pending_file' => basename($pendingFile),
-                        'prediction_id' => $predictionId,
-                        'original_prediction_id' => $pending['original_prediction_id']
-                    ]);
-
+                    // First generate panel ID and state
                     $panelResult = $comicGenerator->generatePanel(
                         $panelData['characters'],
                         $panelData['scene_description'],
                         $pending['original_prediction_id']
                     );
+
+                    $logger->error("TEST_LOG - Panel generation completed after cartoonification", [
+                        'result' => $panelResult
+                    ]);
+
+                    // Now trigger SDXL with cartoonified image
+                    try {
+                        // Prepare SDXL parameters
+                        $sdxlParams = [
+                            'cartoonified_image' => $cartoonifiedUrl,
+                            'prompt' => $panelData['scene_description'],
+                            'options' => [
+                                'style' => $panelData['characters'][0]['options']['style'] ?? 'modern'
+                            ],
+                            'original_prediction_id' => $panelResult['id']
+                        ];
+
+                        // Call SDXL generation
+                        $sdxlResult = $replicateClient->generateImage($sdxlParams);
+
+                        // Update panel file with SDXL prediction ID
+                        $panelFile = $tempPath . $panelResult['id'] . '.json';
+                        $currentPanel = json_decode(file_get_contents($panelFile), true) ?? [];
+                        $currentPanel['sdxl_prediction_id'] = $sdxlResult['id'];
+                        $currentPanel['status'] = 'processing';
+                        file_put_contents($panelFile, json_encode($currentPanel));
+
+                        $logger->error("TEST_LOG - SDXL generation initiated", [
+                            'panel_id' => $panelResult['id'],
+                            'sdxl_prediction_id' => $sdxlResult['id'],
+                            'cartoonified_url' => $cartoonifiedUrl
+                        ]);
+                    } catch (Exception $e) {
+                        $logger->error("Failed to initiate SDXL generation", [
+                            'error' => $e->getMessage(),
+                            'panel_id' => $panelResult['id']
+                        ]);
+                        throw $e;
+                    }
 
                     // Store the mapping between cartoonification and panel
                     if (isset($panelResult['id'])) {
@@ -279,17 +331,6 @@ try {
                             'created_at' => date('c')
                         ]));
                     }
-
-                    $logger->error("TEST_LOG - Panel generation completed after cartoonification", [
-                        'result' => [
-                            'status' => $panelResult['status'] ?? 'unknown',
-                            'has_output' => isset($panelResult['output']),
-                            'prediction_id' => $predictionId,
-                            'panel_id' => $panelResult['id'] ?? null,
-                            'cartoonified_url' => $cartoonifiedUrl,
-                            'original_prediction_id' => $pending['original_prediction_id']
-                        ]
-                    ]);
 
                     // Clean up the pending file since we're done with cartoonification
                     @unlink($pendingFile);
