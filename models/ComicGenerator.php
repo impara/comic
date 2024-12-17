@@ -111,14 +111,24 @@ class ComicGenerator
                             'stage' => 'cartoonify',
                             'next_stage' => 'sdxl',
                             'character_id' => $character['id'],
-                            'panel_data' => json_encode([
+                            'panel_data' => [
                                 'characters' => [$character],
                                 'scene_description' => $sceneDescription,
                                 'original_panel_id' => $panelId
-                            ]),
+                            ],
                             'state_file' => basename($stateFile),
                             'started_at' => time()
                         ]));
+
+                        $this->logger->error("TEST_LOG - Created prediction mapping with panel data", [
+                            'prediction_id' => $cartoonificationResult['id'],
+                            'character_id' => $character['id'],
+                            'original_panel_id' => $panelId,
+                            'pending_file' => basename($pendingFile),
+                            'state_file' => basename($stateFile),
+                            'has_scene_description' => isset($sceneDescription),
+                            'has_character_style' => isset($character['options']['style'])
+                        ]);
 
                         // Update state file with pending cartoonification
                         $state = json_decode(file_get_contents($stateFile), true);
@@ -133,14 +143,6 @@ class ComicGenerator
                             'original_panel_id' => $panelId
                         ];
                         file_put_contents($stateFile, json_encode($state));
-
-                        $this->logger->error("TEST_LOG - Created prediction mapping", [
-                            'prediction_id' => $cartoonificationResult['id'],
-                            'character_id' => $character['id'],
-                            'original_panel_id' => $panelId,
-                            'pending_file' => basename($pendingFile),
-                            'state_file' => basename($stateFile)
-                        ]);
                     }
                 } catch (Exception $e) {
                     $this->logger->error("Failed to process character", [

@@ -4,9 +4,11 @@ require_once __DIR__ . '/bootstrap.php';
 require_once __DIR__ . '/models/Config.php';
 require_once __DIR__ . '/interfaces/LoggerInterface.php';
 require_once __DIR__ . '/models/Logger.php';
+require_once __DIR__ . '/models/ReplicateClient.php';
 
 $logger = new Logger();
 $config = Config::getInstance();
+$replicateClient = new ReplicateClient($logger);
 
 try {
     // Get the webhook payload
@@ -233,69 +235,120 @@ try {
                         $state['status'] = 'cartoonification_complete';
                     }
 
-                    if (file_put_contents($stateFile, json_encode($state)) === false) {
-                        throw new Exception("Failed to update state file");
+                    // Add file locking for state updates
+                    $lockFile = $tempPath . "state_{$originalPanelId}.lock";
+                    $fp = fopen($lockFile, 'w');
+                    if (!flock($fp, LOCK_EX)) {
+                        throw new Exception("Could not acquire lock for state file update");
                     }
 
-                    $logger->error("TEST_LOG - Updated state file with cartoonification success", [
-                        'state_file' => basename($stateFile),
-                        'prediction_id' => $predictionId,
-                        'status' => $state['status'],
-                        'cartoonification_count' => count($state['cartoonification_requests'])
-                    ]);
-
-                    // Start SDXL if cartoonification is complete
-                    if ($allComplete) {
-                        // Get cartoonified URL
-                        $cartoonifiedUrl = null;
-                        foreach ($state['cartoonification_requests'] as $request) {
-                            if ($request['status'] === 'succeeded' && !empty($request['output'])) {
-                                $cartoonifiedUrl = $request['output'];
-                                break;
-                            }
+                    try {
+                        if (file_put_contents($stateFile, json_encode($state)) === false) {
+                            throw new Exception("Failed to update state file");
                         }
 
-                        if (!$cartoonifiedUrl) {
-                            throw new Exception("No successful cartoonification output found");
-                        }
-
-                        // Start SDXL
-                        $sdxlResult = $replicateClient->generateImage([
-                            'cartoonified_image' => $cartoonifiedUrl,
-                            'prompt' => $panelData['scene_description'],
-                            'original_panel_id' => $originalPanelId,
-                            'options' => [
-                                'style' => $panelData['characters'][0]['options']['style'] ?? 'modern'
-                            ]
+                        $logger->error("TEST_LOG - Updated state file with cartoonification success", [
+                            'state_file' => basename($stateFile),
+                            'prediction_id' => $predictionId,
+                            'status' => $state['status'],
+                            'cartoonification_count' => count($state['cartoonification_requests']),
+                            'locked' => true
                         ]);
 
-                        // 1. Create SDXL pending file FIRST
-                        $sdxlPendingFile = $tempPath . "pending_{$sdxlResult['id']}.json";
-                        file_put_contents($sdxlPendingFile, json_encode([
-                            'prediction_id' => $sdxlResult['id'],
-                            'original_panel_id' => $originalPanelId,
-                            'stage' => 'sdxl',
-                            'cartoonified_url' => $cartoonifiedUrl,
-                            'started_at' => time(),
-                            'panel_data' => $pending['panel_data']
-                        ]));
+                        // Start SDXL if cartoonification is complete
+                        if ($allComplete) {
+                            // Get cartoonified URL
+                            $cartoonifiedUrl = null;
+                            foreach ($state['cartoonification_requests'] as $request) {
+                                if ($request['status'] === 'succeeded' && !empty($request['output'])) {
+                                    $cartoonifiedUrl = $request['output'];
+                                    break;
+                                }
+                            }
 
-                        // 2. Verify SDXL pending file exists and is valid
-                        if (!file_exists($sdxlPendingFile)) {
-                            throw new Exception("SDXL pending file was not created");
+                            if (!$cartoonifiedUrl) {
+                                throw new Exception("No successful cartoonification output found");
+                            }
+
+                            // Extract panel data and start SDXL under the same lock
+                            $panelData = $pending['panel_data'];
+                            if (is_string($panelData)) {
+                                $panelData = json_decode($panelData, true);
+                            }
+
+                            if (!$panelData || !isset($panelData['scene_description'])) {
+                                $logger->error("TEST_LOG - Panel data validation failed", [
+                                    'panel_data_type' => gettype($panelData),
+                                    'has_scene_description' => isset($panelData['scene_description']),
+                                    'raw_panel_data' => $pending['panel_data']
+                                ]);
+                                throw new Exception("Invalid or missing panel data in pending file");
+                            }
+
+                            $logger->error("TEST_LOG - Starting SDXL with panel data", [
+                                'has_scene_description' => isset($panelData['scene_description']),
+                                'has_characters' => isset($panelData['characters']),
+                                'panel_id' => $originalPanelId,
+                                'scene_description' => $panelData['scene_description'],
+                                'character_style' => $panelData['characters'][0]['options']['style'] ?? 'modern',
+                                'has_character_options' => isset($panelData['characters'][0]['options']),
+                                'raw_character_data' => $panelData['characters'][0]
+                            ]);
+
+                            // Start SDXL
+                            $sdxlResult = $replicateClient->generateImage([
+                                'cartoonified_image' => $cartoonifiedUrl,
+                                'prompt' => $panelData['scene_description'],
+                                'original_panel_id' => $originalPanelId,
+                                'options' => [
+                                    'style' => $panelData['characters'][0]['options']['style'] ?? 'modern'
+                                ]
+                            ]);
+
+                            // Update state with SDXL info while still holding the lock
+                            $state['sdxl_status'] = 'processing';
+                            $state['sdxl_prediction_id'] = $sdxlResult['id'];
+                            $state['sdxl_started_at'] = time();
+                            if (file_put_contents($stateFile, json_encode($state)) === false) {
+                                throw new Exception("Failed to update state file with SDXL info");
+                            }
+
+                            // Create SDXL pending file
+                            $sdxlPendingFile = $tempPath . "pending_{$sdxlResult['id']}.json";
+                            file_put_contents($sdxlPendingFile, json_encode([
+                                'prediction_id' => $sdxlResult['id'],
+                                'original_panel_id' => $originalPanelId,
+                                'stage' => 'sdxl',
+                                'cartoonified_url' => $cartoonifiedUrl,
+                                'started_at' => time(),
+                                'panel_data' => $pending['panel_data']
+                            ]));
+
+                            if (!file_exists($sdxlPendingFile)) {
+                                throw new Exception("SDXL pending file was not created");
+                            }
+
+                            $logger->error("TEST_LOG - Created SDXL pending file and updated state", [
+                                'sdxl_pending_file' => basename($sdxlPendingFile),
+                                'state_file' => basename($stateFile),
+                                'locked' => true
+                            ]);
                         }
-
-                        // 3. Update state file
-                        $state['sdxl_status'] = 'processing';
-                        $state['sdxl_prediction_id'] = $sdxlResult['id'];
-                        $state['sdxl_started_at'] = time();
-                        file_put_contents($stateFile, json_encode($state));
-
-                        // 4. Only NOW delete cartoonify pending file
-                        @unlink($pendingFile);
-
-                        return;
+                    } finally {
+                        // Always release the lock
+                        flock($fp, LOCK_UN);
+                        fclose($fp);
+                        @unlink($lockFile);
                     }
+
+                    // Clean up cartoonification pending file after releasing lock
+                    @unlink($pendingFile);
+                    $logger->error("TEST_LOG - Cleaned up cartoonification pending file", [
+                        'file' => basename($pendingFile),
+                        'prediction_id' => $predictionId
+                    ]);
+
+                    return;
                 } else if ($data['status'] === 'failed') {
                     // Handle failed cartoonification
                     if (!isset($state['cartoonification_requests'])) {

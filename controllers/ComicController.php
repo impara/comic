@@ -109,11 +109,17 @@ class ComicController
                     $pendingFile = $tempPath . "pending_{$result['pending_predictions'][0]}.json";
                     if (file_exists($pendingFile)) {
                         $pending = json_decode(file_get_contents($pendingFile), true);
-                        $pending['panel_data'] = json_encode([
+                        $pending['panel_data'] = [
                             'characters' => [$character],
                             'scene_description' => $input['scene_description']
-                        ]);
+                        ];
                         file_put_contents($pendingFile, json_encode($pending));
+
+                        $this->logger->error("TEST_LOG - Updated pending file with panel data", [
+                            'file' => basename($pendingFile),
+                            'has_scene_description' => isset($pending['panel_data']['scene_description']),
+                            'has_characters' => isset($pending['panel_data']['characters'])
+                        ]);
                     }
 
                     echo json_encode([
