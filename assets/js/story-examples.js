@@ -1,34 +1,34 @@
 // Story examples for the comic generator
 const storyExamples = [
     {
-        title: "Manga Style: Inner Strength",
-        text: `The Hero stood facing the rising sun. 「I must become stronger」, he declared with determination. The Mentor watched from afar and thought to himself, 「The path ahead will test him greatly」. The Hero clenched his fist and wondered, "Can I really master this power?" Meanwhile, the Sidekick observed silently, reflecting on their shared journey.`,
+        title: "Manga Style: Training Journey",
+        text: `Panel 1: The Hero stands alone in a misty dojo, gripping a wooden sword. Panel 2: The Mentor demonstrates a powerful technique, energy swirling. Panel 3: The Hero attempts the move, stumbling but determined. Panel 4: The Hero finally succeeds, the wooden sword glowing with inner power.`,
         style: "manga"
     },
     {
-        title: "European Comic: The Grand Adventure",
-        text: `In the ancient library, the Mentor adjusted his spectacles. «The ancient texts speak of a hidden power», he announced mysteriously. The Hero pondered this revelation, while the Friend whispered, «Perhaps we should investigate further». The Villain, lurking in the shadows, contemplated their next move, realizing the perfect moment to strike was approaching.`,
+        title: "European Comic: The Mystery Unfolds",
+        text: `Panel 1: The Detective examines mysterious footprints in the library. Panel 2: A dusty book reveals an ancient map with a hidden symbol. Panel 3: Following the clues leads to a secret door behind a bookshelf. Panel 4: The door opens to reveal a glowing artifact on a pedestal.`,
         style: "european"
     },
     {
-        title: "Classic Comic: Team Dynamics",
-        text: `"We need to work together!" the Hero shouted over the chaos. The Sidekick rushed forward, thinking to themselves, "This is our chance to prove ourselves!" The Mentor observed the situation and mused, "They're finally beginning to understand." The Friend called out encouragingly, "You've got this!" while silently wondering if they were truly ready.`,
+        title: "Classic Comic: Heroic Rescue",
+        text: `Panel 1: Smoke rises from a burning building as crowds gather below. Panel 2: The Hero swoops down from above, cape flowing dramatically. Panel 3: The Hero navigates through flames, carrying a child to safety. Panel 4: Cheering crowds celebrate as firefighters arrive to handle the scene.`,
         style: "comic"
     },
     {
-        title: "Manga Style: Training Session",
-        text: `『Focus your energy!』 the Mentor commanded. The Hero gripped their weapon tightly, thinking to themselves, 「I can't let everyone down」. The Sidekick watched intently and realized, 「The technique is about precision, not power」. The Friend cheered from the sidelines, 『You're almost there!』 while the Pet silently contemplated their master's growth.`,
+        title: "Manga Style: Friendship's Power",
+        text: `Panel 1: The Hero faces a powerful opponent, breathing heavily. Panel 2: Memories flash of training with friends who believed in them. Panel 3: The Hero's aura begins to glow with newfound strength. Panel 4: The Hero unleashes an amazing technique, friends cheering in the background.`,
         style: "manga"
     },
     {
-        title: "European Comic: The Mystery",
-        text: `«Something's not quite right here», the Hero muttered, examining the clues. The Mentor stroked his beard and pondered the situation deeply. The Sidekick paced nervously, thinking to themselves, «What are we missing?» The Friend suddenly exclaimed, «Look at this pattern!» while the Villain watched through a hidden camera, contemplating how their plan was unfolding perfectly.`,
+        title: "European Comic: The Chase",
+        text: `Panel 1: The Thief runs through narrow city streets, clutching a mysterious package. Panel 2: The Detective follows, leaping over market stalls. Panel 3: A chase across rooftops, pigeons scattering in their wake. Panel 4: The Thief is cornered at a dead end, the Detective revealing a badge.`,
         style: "european"
     },
     {
-        title: "Mixed Styles: Cultural Exchange",
-        text: `"Welcome to my dojo," the Mentor said warmly. The Hero bowed respectfully and replied, 「Thank you for teaching me」. The Friend watched in amazement and thought to themselves, «This is where legends begin». The Sidekick, trying to follow protocol, awkwardly mixed their greetings: "I mean... 『Thank you, sensei!』" The Pet, curled up in the corner, mused about how humans made everything so complicated.`,
-        style: "manga"
+        title: "Modern Comic: Team Victory",
+        text: `Panel 1: The Team stands together, facing a giant robot menace. Panel 2: Each hero uses their unique powers in coordination. Panel 3: The robot begins to malfunction under their combined assault. Panel 4: Victory pose as the sun sets behind the defeated machine.`,
+        style: "modern"
     }
 ];
 
