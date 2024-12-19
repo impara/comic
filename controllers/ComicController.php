@@ -39,7 +39,8 @@ class ComicController
         $rawInput = file_get_contents('php://input');
         $this->logger->info('Received request', [
             'raw_input_length' => strlen($rawInput),
-            'content_type' => $_SERVER['CONTENT_TYPE'] ?? 'not set'
+            'content_type' => $_SERVER['CONTENT_TYPE'] ?? 'not set',
+            'raw_input' => $rawInput
         ]);
 
         $input = json_decode($rawInput, true);
@@ -48,7 +49,8 @@ class ComicController
                 'json_error' => json_last_error_msg(),
                 'content_type' => $_SERVER['CONTENT_TYPE'] ?? 'not set',
                 'request_method' => $_SERVER['REQUEST_METHOD'],
-                'headers' => getallheaders()
+                'headers' => getallheaders(),
+                'raw_input' => $rawInput
             ]);
             http_response_code(400);
             echo json_encode([
@@ -64,8 +66,10 @@ class ComicController
                 'input' => [
                     'character_count' => count($input['characters'] ?? []),
                     'story_length' => strlen($input['story'] ?? ''),
+                    'story_value' => $input['story'] ?? null,
+                    'story_type' => gettype($input['story'] ?? null),
                     'art_style' => $input['art_style'] ?? 'not set',
-                    'background' => $input['background'] ?? 'not set'
+                    'raw_input' => $input
                 ]
             ]);
 
@@ -163,13 +167,9 @@ class ComicController
             $this->validateCharacter($character, $index);
         }
 
-        // Validate style and background
+        // Validate style
         if (!isset($input['art_style']) || empty($input['art_style'])) {
             throw new RuntimeException('Art style is required');
-        }
-
-        if (!isset($input['background']) || empty($input['background'])) {
-            throw new RuntimeException('Background description is required');
         }
 
         $this->logger->info('Input validation successful');

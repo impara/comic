@@ -74,23 +74,16 @@ export const ComicGenerator = {
         e.preventDefault();
         console.log('Comic generation started');
 
-        // Debug: Log all session storage data
-        console.log('All session storage data:', {
-            userStory: sessionStorage.getItem('userStory'),
-            selectedStyle: sessionStorage.getItem('selectedStyle'),
-            selectedCharacters: sessionStorage.getItem('selectedCharacters'),
-            characterData: sessionStorage.getItem('characterData')
-        });
-
         // Get story and style from session storage
         const userStory = sessionStorage.getItem('userStory');
         const selectedStyle = sessionStorage.getItem('selectedStyle');
         const selectedCharacterIds = JSON.parse(sessionStorage.getItem('selectedCharacters') || '[]');
 
-        console.log('Retrieved from session storage:', {
-            userStory: userStory,
-            selectedStyle: selectedStyle,
-            selectedCharacterIds: selectedCharacterIds
+        // Debug: Log retrieved data
+        console.log('Retrieved data:', {
+            story: userStory,
+            style: selectedStyle,
+            characterIds: selectedCharacterIds
         });
 
         if (!userStory || !selectedStyle || !selectedCharacterIds.length) {
@@ -105,56 +98,34 @@ export const ComicGenerator = {
 
         // Get custom character data
         const characterData = JSON.parse(sessionStorage.getItem('characterData') || '{}');
-        console.log('Retrieved character data from session:', characterData);
 
-        // Create array of character details from selected characters
+        // Process characters
         const characters = selectedCharacterIds.map(id => {
             const char = characterData[id];
             if (!char) {
                 console.error('Character not found:', id);
                 return null;
             }
-
-            // Ensure image URL is complete
-            let imageUrl = char.image;
-            if (imageUrl && !imageUrl.startsWith('data:') && !imageUrl.startsWith('http')) {
-                // Convert relative URLs to absolute
-                imageUrl = new URL(imageUrl, window.location.origin).href;
-            }
-
             return {
                 id: char.id,
                 name: char.name,
-                description: char.name,
-                image: imageUrl,
-                isCustom: true,
+                description: char.description || char.name,
+                image: char.image,
+                isCustom: char.isCustom,
                 options: {
                     style: selectedStyle
                 }
             };
-        }).filter(char => char !== null);
+        }).filter(Boolean);
 
-        console.log('Processed characters:', characters);
-
-        if (characters.length === 0) {
-            console.error('No valid characters found');
-            this.handleGenerationError('Please upload at least one custom character before generating the comic.');
-            return;
-        }
-
-        // Collect form data
+        // Prepare form data
         const formData = {
             characters: characters,
             story: userStory,
             art_style: selectedStyle
         };
 
-        console.log('Sending comic generation data:', formData);
-
-        // Update UI for generation process
-        UIManager.showGeneratingState();
-
-        // Send request to generate comic
+        // Generate the comic
         this.generateComic(formData);
     },
 
@@ -171,29 +142,28 @@ export const ComicGenerator = {
     },
 
     generateComic(formData) {
-        // Detailed request logging
-        console.log('Initiating comic generation with data:', {
-            story_length: formData.story?.length,
-            art_style: formData.art_style,
-            character_count: formData.characters?.length,
-            characters: formData.characters,
-            raw_data: JSON.stringify(formData, null, 2)
-        });
-
         const apiUrl = this.getApiUrl('api.php');
         console.log('Sending POST request to:', apiUrl);
 
         // Add loading indicator to UI
         $('#debugInfo').html('<p>Sending request to server...</p>');
 
-        // Log the exact request payload
-        const requestPayload = JSON.stringify(formData);
+        // Ensure story parameter is correctly named
+        const requestPayload = {
+            characters: formData.characters,
+            story: formData.story,
+            art_style: formData.art_style
+        };
+
+        // Log the exact payload that will be sent
         console.log('Request payload:', requestPayload);
+
+        const stringifiedPayload = JSON.stringify(requestPayload);
 
         $.ajax({
             url: apiUrl,
             type: 'POST',
-            data: requestPayload,
+            data: stringifiedPayload,
             contentType: 'application/json',
             dataType: 'json',
             success: (response) => {
