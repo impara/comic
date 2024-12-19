@@ -1,67 +1,104 @@
 // Debug Information Management
 document.addEventListener('DOMContentLoaded', function () {
-    // Only initialize debug functionality if debug elements exist
-    const debugSection = document.getElementById('debugInfo');
-    if (!debugSection) return;
+    let isDebugActive = false;
+    let debugInterval = null;
 
-    // Set page load time
-    const pageLoadTimeElement = document.getElementById('pageLoadTime');
-    if (pageLoadTimeElement) {
-        pageLoadTimeElement.textContent = new Date().toLocaleTimeString();
+    // Initialize debug functionality
+    function initializeDebug() {
+        const debugSection = document.getElementById('debugInfo');
+        if (!debugSection) {
+            cleanupDebug();
+            return false;
+        }
+
+        if (!isDebugActive) {
+            // Set page load time only once when initializing
+            const pageLoadTimeElement = document.getElementById('pageLoadTime');
+            if (pageLoadTimeElement) {
+                pageLoadTimeElement.textContent = new Date().toLocaleTimeString();
+            }
+
+            // Set up pay button listener
+            const payButton = document.getElementById('payButton');
+            const lastActionElement = document.getElementById('lastAction');
+            if (payButton && lastActionElement) {
+                payButton.addEventListener('click', function () {
+                    lastActionElement.textContent = 'Pay button clicked at ' + new Date().toLocaleTimeString();
+                    console.log('Pay button clicked (from debug script)');
+                });
+            }
+
+            isDebugActive = true;
+        }
+
+        return true;
     }
 
-    // Update session storage content
+    // Clean up debug resources
+    function cleanupDebug() {
+        if (debugInterval) {
+            clearInterval(debugInterval);
+            debugInterval = null;
+        }
+        isDebugActive = false;
+    }
+
+    // Update debug information
     function updateDebugInfo() {
+        // Check if debug section still exists
+        if (!initializeDebug()) {
+            return;
+        }
+
         try {
             // Session Storage
             const sessionStorageElement = document.getElementById('sessionStorageContent');
             if (sessionStorageElement) {
                 const sessionData = {};
-                for (let i = 0; i < sessionStorage.length; i++) {
-                    const key = sessionStorage.key(i);
-                    sessionData[key] = sessionStorage.getItem(key);
+                try {
+                    for (let i = 0; i < sessionStorage.length; i++) {
+                        const key = sessionStorage.key(i);
+                        if (key) {
+                            sessionData[key] = sessionStorage.getItem(key);
+                        }
+                    }
+                    sessionStorageElement.textContent = JSON.stringify(sessionData, null, 2);
+                } catch (storageError) {
+                    console.warn('Error accessing session storage:', storageError);
+                    sessionStorageElement.textContent = '{}';
                 }
-                sessionStorageElement.textContent = JSON.stringify(sessionData, null, 2);
             }
 
             // Form State
             const formStateElement = document.getElementById('formStateContent');
             if (formStateElement) {
                 const formState = {
-                    story: document.getElementById('story-input')?.value,
-                    currentStep: document.querySelector('.step.active')?.dataset.step
+                    story: document.getElementById('story-input')?.value || '',
+                    currentStep: document.querySelector('.step.active')?.dataset.step || '1'
                 };
                 formStateElement.textContent = JSON.stringify(formState, null, 2);
             }
         } catch (error) {
             console.error('Error updating debug info:', error);
+            cleanupDebug();
         }
     }
 
-    // Update debug info every 2 seconds
-    const debugInterval = setInterval(updateDebugInfo, 2000);
+    // Start debug monitoring if debug section exists
+    if (initializeDebug()) {
+        debugInterval = setInterval(updateDebugInfo, 2000);
 
-    // Log when pay button is clicked
-    const payButton = document.getElementById('payButton');
-    const lastActionElement = document.getElementById('lastAction');
+        // Set up observer to handle debug section removal
+        const observer = new MutationObserver(function (mutations) {
+            if (!document.getElementById('debugInfo')) {
+                cleanupDebug();
+                observer.disconnect();
+            }
+        });
 
-    if (payButton && lastActionElement) {
-        payButton.addEventListener('click', function () {
-            lastActionElement.textContent = 'Pay button clicked at ' + new Date().toLocaleTimeString();
-            console.log('Pay button clicked (from debug script)');
+        observer.observe(document.body, {
+            childList: true,
+            subtree: true
         });
     }
-
-    // Clean up interval if debug section is removed
-    const observer = new MutationObserver(function (mutations) {
-        if (!document.getElementById('debugInfo')) {
-            clearInterval(debugInterval);
-            observer.disconnect();
-        }
-    });
-
-    observer.observe(document.body, {
-        childList: true,
-        subtree: true
-    });
 }); 
