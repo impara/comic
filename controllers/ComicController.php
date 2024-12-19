@@ -39,15 +39,13 @@ class ComicController
         $rawInput = file_get_contents('php://input');
         $this->logger->info('Received request', [
             'raw_input_length' => strlen($rawInput),
-            'content_type' => $_SERVER['CONTENT_TYPE'] ?? 'not set',
-            'raw_input' => $rawInput // Log the raw input
+            'content_type' => $_SERVER['CONTENT_TYPE'] ?? 'not set'
         ]);
 
         $input = json_decode($rawInput, true);
         if (!$input) {
             $this->logger->error('Invalid JSON input', [
                 'json_error' => json_last_error_msg(),
-                'raw_input' => $rawInput,
                 'content_type' => $_SERVER['CONTENT_TYPE'] ?? 'not set',
                 'request_method' => $_SERVER['REQUEST_METHOD'],
                 'headers' => getallheaders()
@@ -62,92 +60,63 @@ class ComicController
 
         // Handle comic generation
         try {
-            $this->logger->info('Processing comic generation request', [
+            $this->logger->info('Processing comic strip generation request', [
                 'input' => [
                     'character_count' => count($input['characters'] ?? []),
-                    'scene_description_length' => strlen($input['scene_description'] ?? ''),
-                    'art_style' => $input['art_style'] ?? 'not set'
+                    'story_length' => strlen($input['story'] ?? ''),
+                    'art_style' => $input['art_style'] ?? 'not set',
+                    'background' => $input['background'] ?? 'not set'
                 ]
             ]);
 
             // Validate input
             $this->validateInput($input);
 
-            // Process each character
-            foreach ($input['characters'] as $character) {
-                // Add scene description to character options
-                if (!isset($character['options'])) {
-                    $character['options'] = [];
-                }
-                $character['options']['scene_description'] = $input['scene_description'];
-                $character['options']['style'] = $input['art_style'] ?? 'modern';
+            // Prepare generation options
+            $options = $this->prepareGenerationOptions($input);
 
-                $this->logger->error("TEST_LOG - Processing character with scene", [
-                    'character_id' => $character['id'],
-                    'has_scene_description' => isset($character['options']['scene_description']),
-                    'scene_description' => $character['options']['scene_description'],
-                    'style' => $character['options']['style']
-                ]);
+            // Generate the comic strip
+            $result = $this->comicGenerator->generateComicStrip(
+                $input['story'],
+                $input['characters'],
+                $options
+            );
 
-                // Generate the comic panel
-                $result = $this->comicGenerator->generatePanel(
-                    [$character],
-                    $input['scene_description']
-                );
-
-                // If result indicates processing, return that status
-                if (isset($result['status']) && $result['status'] === 'processing') {
-                    $this->logger->info('Comic generation in processing state', [
-                        'result' => $result
-                    ]);
-
-                    // Get the panel ID to use as the main one
-                    $panelId = $result['original_panel_id'];
-
-                    // Update the pending file with panel data
-                    $tempPath = $this->config->getTempPath();
-                    $pendingFile = $tempPath . "pending_{$result['pending_predictions'][0]}.json";
-                    if (file_exists($pendingFile)) {
-                        $pending = json_decode(file_get_contents($pendingFile), true);
-                        $pending['panel_data'] = [
-                            'characters' => [$character],
-                            'scene_description' => $input['scene_description']
-                        ];
-                        file_put_contents($pendingFile, json_encode($pending));
-
-                        $this->logger->error("TEST_LOG - Updated pending file with panel data", [
-                            'file' => basename($pendingFile),
-                            'has_scene_description' => isset($pending['panel_data']['scene_description']),
-                            'has_characters' => isset($pending['panel_data']['characters'])
-                        ]);
-                    }
-
-                    echo json_encode([
-                        'success' => true,
-                        'message' => $result['message'] ?? 'Processing started',
-                        'result' => [
-                            'id' => $panelId,
-                            'status' => 'processing',
-                            'pending_predictions' => $result['pending_predictions'],
-                            'original_panel_id' => $panelId
-                        ]
-                    ]);
-                    return;
-                }
-
-                $this->logger->info('Comic generation successful', [
+            // Return appropriate response based on generation status
+            if ($result['status'] === 'processing') {
+                $this->logger->info('Comic strip generation in processing state', [
                     'result' => $result
                 ]);
-            }
 
-            // Return the result
-            echo json_encode([
-                'success' => true,
-                'message' => 'Comic generated successfully',
-                'result' => $result
-            ]);
+                echo json_encode([
+                    'success' => true,
+                    'message' => 'Comic strip generation started',
+                    'result' => [
+                        'id' => $result['id'],
+                        'status' => 'processing',
+                        'total_panels' => $result['total_panels'],
+                        'pending_panels' => $result['pending_panels']
+                    ]
+                ]);
+            } else {
+                $this->logger->info('Comic strip generation completed', [
+                    'result' => $result
+                ]);
+
+                echo json_encode([
+                    'success' => true,
+                    'message' => 'Comic strip generated successfully',
+                    'result' => [
+                        'id' => $result['id'],
+                        'status' => 'completed',
+                        'total_panels' => $result['total_panels'],
+                        'output_path' => $result['output_path'] ?? null,
+                        'panels' => $result['completed_panels']
+                    ]
+                ]);
+            }
         } catch (Exception $e) {
-            $this->logger->error('Comic generation failed', [
+            $this->logger->error('Comic strip generation failed', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
                 'input' => $input ?? null
@@ -156,7 +125,7 @@ class ComicController
             http_response_code(400);
             echo json_encode([
                 'success' => false,
-                'message' => $this->config->isDebugMode() ? $e->getMessage() : 'Failed to generate comic',
+                'message' => $this->config->isDebugMode() ? $e->getMessage() : 'Failed to generate comic strip',
                 'error' => $this->config->isDebugMode() ? $e->getTraceAsString() : null
             ]);
         }
@@ -170,10 +139,17 @@ class ComicController
     {
         $this->logger->info('Validating input', [
             'has_characters' => isset($input['characters']),
-            'has_scene' => isset($input['scene_description']),
-            'has_style' => isset($input['art_style'])
+            'has_story' => isset($input['story']),
+            'has_style' => isset($input['art_style']),
+            'has_background' => isset($input['background'])
         ]);
 
+        // Validate story
+        if (!isset($input['story']) || empty($input['story'])) {
+            throw new RuntimeException('Story is required');
+        }
+
+        // Validate characters
         if (!isset($input['characters']) || !is_array($input['characters'])) {
             throw new RuntimeException('Characters array is required');
         }
@@ -182,35 +158,82 @@ class ComicController
             throw new RuntimeException('At least one character is required');
         }
 
+        // Validate each character
         foreach ($input['characters'] as $index => $character) {
-            $this->logger->info('Validating character', [
-                'index' => $index,
-                'has_description' => isset($character['description']),
-                'has_image' => isset($character['image']),
-                'image_type' => isset($character['image']) ? (
-                    strpos($character['image'], 'data:image') === 0 ? 'base64' : (filter_var($character['image'], FILTER_VALIDATE_URL) ? 'url' : 'unknown')
-                ) : 'none'
-            ]);
-
-            if (!isset($character['description']) && !isset($character['image'])) {
-                throw new RuntimeException("Character at index $index must have either description or image");
-            }
-
-            if (isset($character['image'])) {
-                if (
-                    !preg_match('/^data:image\/(\w+);base64,/', $character['image'])
-                    && !filter_var($character['image'], FILTER_VALIDATE_URL)
-                    && strpos($character['image'], '/public/generated/') === false
-                ) {
-                    throw new RuntimeException("Character image at index $index must be base64 encoded, a valid URL, or a generated image path");
-                }
-            }
+            $this->validateCharacter($character, $index);
         }
 
-        if (!isset($input['scene_description']) || empty($input['scene_description'])) {
-            throw new RuntimeException('Scene description is required');
+        // Validate style and background
+        if (!isset($input['art_style']) || empty($input['art_style'])) {
+            throw new RuntimeException('Art style is required');
+        }
+
+        if (!isset($input['background']) || empty($input['background'])) {
+            throw new RuntimeException('Background description is required');
         }
 
         $this->logger->info('Input validation successful');
+    }
+
+    /**
+     * Validate a single character
+     * @throws RuntimeException if validation fails
+     */
+    private function validateCharacter(array $character, int $index): void
+    {
+        $this->logger->info('Validating character', [
+            'index' => $index,
+            'has_description' => isset($character['description']),
+            'has_image' => isset($character['image']),
+            'has_id' => isset($character['id'])
+        ]);
+
+        // Validate character ID
+        if (!isset($character['id'])) {
+            throw new RuntimeException("Character at index $index must have an ID");
+        }
+
+        // Validate character description or image
+        if (!isset($character['description']) && !isset($character['image'])) {
+            throw new RuntimeException("Character at index $index must have either description or image");
+        }
+
+        // Validate image format if provided
+        if (isset($character['image'])) {
+            if (
+                !preg_match('/^data:image\/(\w+);base64,/', $character['image'])
+                && !filter_var($character['image'], FILTER_VALIDATE_URL)
+                && strpos($character['image'], '/public/generated/') === false
+            ) {
+                throw new RuntimeException("Character image at index $index must be base64 encoded, a valid URL, or a generated image path");
+            }
+        }
+    }
+
+    /**
+     * Prepare generation options from input
+     * @param array $input Request input
+     * @return array Generation options
+     */
+    private function prepareGenerationOptions(array $input): array
+    {
+        $options = [
+            'style' => [
+                'art_style' => $input['art_style'],
+                'background' => $input['background']
+            ]
+        ];
+
+        // Add any additional style parameters
+        if (isset($input['style_params'])) {
+            $options['style_params'] = $input['style_params'];
+        }
+
+        // Add panel-specific options if provided
+        if (isset($input['panel_options'])) {
+            $options['panel_options'] = $input['panel_options'];
+        }
+
+        return $options;
     }
 }

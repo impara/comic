@@ -58,7 +58,33 @@ return [
                     'seed' => 2862431,
                     'image' => null  // Will be set dynamically
                 ]
+            ],
+            'nlp' => [
+                'version' => '2c1608e18606fad2812020dc541930f2d0495ce32eee50074220b87300bc16e1',
+                'params' => [
+                    'prompt' => null,
+                    'max_length' => 2048,
+                    'temperature' => 0.75,
+                    'top_p' => 0.9,
+                    'repetition_penalty' => 1.2
+                ]
             ]
+        ]
+    ],
+
+    'comic_strip' => [
+        'max_panels' => 6,
+        'min_panels' => 2,
+        'panel_gap' => 20,
+        'strip_padding' => 40,
+        'maintain_aspect_ratio' => true,
+        'panel_dimensions' => [
+            'width' => 1024,
+            'height' => 1024
+        ],
+        'strip_dimensions' => [
+            'max_width' => 4096,
+            'max_height' => 1024
         ]
     ],
 

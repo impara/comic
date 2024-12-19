@@ -437,4 +437,202 @@ class ImageComposer
             return false;
         }
     }
+
+    /**
+     * Compose a complete comic strip from multiple panels
+     * @param array $panels Array of panel image paths
+     * @param string $stripId Comic strip ID
+     * @param array $options Layout options
+     * @return string Path to the composed comic strip
+     * @throws Exception on failure
+     */
+    public function composeStrip(array $panels, string $stripId, array $options = []): string
+    {
+        $this->logger->info("Starting comic strip composition", [
+            'panel_count' => count($panels),
+            'strip_id' => $stripId,
+            'options' => $options
+        ]);
+
+        try {
+            // Get strip dimensions from config
+            $stripConfig = $this->config->get('comic_strip');
+            $maxWidth = $stripConfig['strip_dimensions']['max_width'];
+            $maxHeight = $stripConfig['strip_dimensions']['max_height'];
+            $panelGap = $stripConfig['panel_gap'];
+            $stripPadding = $stripConfig['strip_padding'];
+
+            // Calculate optimal layout
+            $layout = $this->calculateStripLayout(
+                count($panels),
+                $stripConfig['panel_dimensions']['width'],
+                $stripConfig['panel_dimensions']['height'],
+                $maxWidth,
+                $maxHeight,
+                $panelGap,
+                $stripPadding
+            );
+
+            // Create the strip canvas
+            $strip = imagecreatetruecolor($layout['width'], $layout['height']);
+            imagealphablending($strip, true);
+            imagesavealpha($strip, true);
+
+            // Fill with white background
+            $white = imagecolorallocate($strip, 255, 255, 255);
+            imagefill($strip, 0, 0, $white);
+
+            // Add each panel to the strip
+            foreach ($panels as $index => $panelPath) {
+                if (!file_exists($panelPath)) {
+                    throw new RuntimeException("Panel image not found: $panelPath");
+                }
+
+                // Calculate panel position
+                $position = $this->getPanelPosition($index, $layout, $stripConfig);
+
+                // Load and add panel
+                $panelImage = $this->loadImage($panelPath);
+                if (!$panelImage) {
+                    throw new RuntimeException("Failed to load panel image: $panelPath");
+                }
+
+                // Copy panel to strip
+                imagecopy(
+                    $strip,
+                    $panelImage,
+                    $position['x'],
+                    $position['y'],
+                    0,
+                    0,
+                    imagesx($panelImage),
+                    imagesy($panelImage)
+                );
+
+                imagedestroy($panelImage);
+            }
+
+            // Save the composed strip
+            $outputPath = $this->outputDir . "/strip_{$stripId}.png";
+            imagepng($strip, $outputPath, 9); // Maximum compression
+            imagedestroy($strip);
+
+            // Update strip state
+            $this->updateStripState($stripId, [
+                'status' => 'completed',
+                'output_path' => $outputPath,
+                'completed_at' => time()
+            ]);
+
+            return $outputPath;
+        } catch (Exception $e) {
+            $this->logger->error("Strip composition failed", [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            // Update strip state with error
+            $this->updateStripState($stripId, [
+                'status' => 'failed',
+                'error' => $e->getMessage(),
+                'failed_at' => time()
+            ]);
+
+            throw $e;
+        }
+    }
+
+    /**
+     * Calculate optimal layout for the comic strip
+     * @param int $panelCount Number of panels
+     * @param int $panelWidth Single panel width
+     * @param int $panelHeight Single panel height
+     * @param int $maxWidth Maximum strip width
+     * @param int $maxHeight Maximum strip height
+     * @param int $gap Gap between panels
+     * @param int $padding Strip padding
+     * @return array Layout information
+     */
+    private function calculateStripLayout(
+        int $panelCount,
+        int $panelWidth,
+        int $panelHeight,
+        int $maxWidth,
+        int $maxHeight,
+        int $gap,
+        int $padding
+    ): array {
+        // Calculate number of rows and columns
+        $maxPanelsPerRow = floor(($maxWidth - 2 * $padding + $gap) / ($panelWidth + $gap));
+        $rows = ceil($panelCount / $maxPanelsPerRow);
+        $cols = min($maxPanelsPerRow, $panelCount);
+
+        // Calculate actual dimensions
+        $width = 2 * $padding + $cols * $panelWidth + ($cols - 1) * $gap;
+        $height = 2 * $padding + $rows * $panelHeight + ($rows - 1) * $gap;
+
+        return [
+            'width' => $width,
+            'height' => $height,
+            'rows' => $rows,
+            'cols' => $cols,
+            'panel_width' => $panelWidth,
+            'panel_height' => $panelHeight,
+            'gap' => $gap,
+            'padding' => $padding
+        ];
+    }
+
+    /**
+     * Calculate position for a panel in the strip
+     * @param int $index Panel index
+     * @param array $layout Layout information
+     * @param array $config Strip configuration
+     * @return array Position coordinates
+     */
+    private function getPanelPosition(int $index, array $layout, array $config): array
+    {
+        $row = floor($index / $layout['cols']);
+        $col = $index % $layout['cols'];
+
+        return [
+            'x' => $layout['padding'] + $col * ($layout['panel_width'] + $layout['gap']),
+            'y' => $layout['padding'] + $row * ($layout['panel_height'] + $layout['gap'])
+        ];
+    }
+
+    /**
+     * Update the strip state file
+     * @param string $stripId Strip ID
+     * @param array $update Update data
+     */
+    private function updateStripState(string $stripId, array $update): void
+    {
+        $stateFile = $this->config->getTempPath() . "strip_state_{$stripId}.json";
+        if (file_exists($stateFile)) {
+            $state = json_decode(file_get_contents($stateFile), true);
+            $state = array_merge($state, $update, ['updated_at' => time()]);
+            file_put_contents($stateFile, json_encode($state));
+        }
+    }
+
+    /**
+     * Load an image from a file path
+     * @param string $path Image file path
+     * @return \GdImage|false GD image resource or false on failure
+     */
+    private function loadImage(string $path): \GdImage|false
+    {
+        $type = exif_imagetype($path);
+        switch ($type) {
+            case IMAGETYPE_JPEG:
+                return imagecreatefromjpeg($path);
+            case IMAGETYPE_PNG:
+                return imagecreatefrompng($path);
+            case IMAGETYPE_GIF:
+                return imagecreatefromgif($path);
+            default:
+                return false;
+        }
+    }
 }

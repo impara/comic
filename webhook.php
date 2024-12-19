@@ -86,6 +86,7 @@ try {
 
         if ($pending && isset($pending['prediction_id']) && $pending['prediction_id'] === $predictionId) {
             $originalPanelId = $pending['original_panel_id'] ?? null;
+            $stripId = $pending['strip_id'] ?? null;
             $currentStage = $pending['stage'] ?? 'unknown';
 
             if (!$originalPanelId) {
@@ -100,8 +101,70 @@ try {
                 'prediction_id' => $predictionId,
                 'stage' => $currentStage,
                 'original_panel_id' => $originalPanelId,
+                'strip_id' => $stripId,
                 'status' => $data['status']
             ]);
+
+            // Get state file path
+            $stateFile = $tempPath . "state_{$originalPanelId}.json";
+            if (!file_exists($stateFile)) {
+                $logger->error("State file not found", [
+                    'state_file' => basename($stateFile),
+                    'original_panel_id' => $originalPanelId
+                ]);
+                continue;
+            }
+
+            // Update strip state if available
+            if ($stripId) {
+                $stripStateFile = $tempPath . "strip_state_{$stripId}.json";
+                if (file_exists($stripStateFile)) {
+                    $stripState = json_decode(file_get_contents($stripStateFile), true);
+                    if ($stripState) {
+                        // Update panel status in strip state
+                        if (isset($stripState['panels'])) {
+                            foreach ($stripState['panels'] as &$panel) {
+                                if ($panel['id'] === $originalPanelId) {
+                                    $panel['status'] = $data['status'];
+                                    $panel['updated_at'] = time();
+                                    if ($data['status'] === 'succeeded') {
+                                        $panel['completed_at'] = time();
+                                    } else if ($data['status'] === 'failed') {
+                                        $panel['failed_at'] = time();
+                                        $panel['error'] = $data['error'] ?? 'Unknown error';
+                                    }
+                                    break;
+                                }
+                            }
+
+                            // Check if all panels are complete
+                            $allComplete = true;
+                            $anyFailed = false;
+                            foreach ($stripState['panels'] as $panel) {
+                                if ($panel['status'] === 'failed') {
+                                    $anyFailed = true;
+                                    break;
+                                }
+                                if ($panel['status'] !== 'succeeded') {
+                                    $allComplete = false;
+                                }
+                            }
+
+                            if ($anyFailed) {
+                                $stripState['status'] = 'failed';
+                                $stripState['error'] = 'One or more panels failed to generate';
+                                $stripState['failed_at'] = time();
+                            } else if ($allComplete) {
+                                $stripState['status'] = 'completed';
+                                $stripState['completed_at'] = time();
+                            }
+
+                            $stripState['updated_at'] = time();
+                            file_put_contents($stripStateFile, json_encode($stripState));
+                        }
+                    }
+                }
+            }
 
             // Get state file path
             $stateFile = $tempPath . "state_{$originalPanelId}.json";

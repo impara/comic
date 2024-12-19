@@ -306,4 +306,72 @@ class ReplicateClient
             throw $e;
         }
     }
+
+    /**
+     * Make a prediction using any Replicate model
+     * @param string $modelType The type of model to use (e.g., 'nlp', 'sdxl', etc.)
+     * @param array $params Parameters for the model
+     * @return array Prediction result
+     * @throws RuntimeException if model type is not configured or prediction fails
+     */
+    public function predict(string $modelType, array $params): array
+    {
+        $this->logger->info("Making prediction with model", [
+            'model_type' => $modelType,
+            'params' => $params
+        ]);
+
+        try {
+            // Get model configuration
+            $modelConfig = $this->config->get("replicate.models.{$modelType}");
+            if (!$modelConfig) {
+                throw new RuntimeException("Model type '{$modelType}' not configured");
+            }
+
+            // Merge default parameters with provided ones
+            $modelParams = array_merge($modelConfig['params'], $params);
+
+            // Get the webhook URL from config
+            $webhookUrl = $this->config->getBaseUrl() . '/webhook.php';
+
+            // Make the API call
+            $result = $this->httpClient->post('https://api.replicate.com/v1/predictions', [
+                'version' => $modelConfig['version'],
+                'input' => $modelParams,
+                'webhook' => $webhookUrl,
+                'webhook_events_filter' => ['completed']
+            ]);
+
+            $this->logger->info("Prediction initiated", [
+                'model_type' => $modelType,
+                'result' => $result
+            ]);
+
+            // For synchronous models (like NLP), wait for completion
+            if ($modelType === 'nlp') {
+                // Poll for results
+                $maxAttempts = 30;
+                $attempt = 0;
+                while ($attempt < $maxAttempts) {
+                    $status = $this->httpClient->get("https://api.replicate.com/v1/predictions/{$result['id']}");
+                    if ($status['status'] === 'succeeded') {
+                        return $status['output'];
+                    } elseif ($status['status'] === 'failed') {
+                        throw new RuntimeException("Prediction failed: " . ($status['error'] ?? 'Unknown error'));
+                    }
+                    $attempt++;
+                    sleep(2);
+                }
+                throw new RuntimeException("Prediction timed out");
+            }
+
+            return $result;
+        } catch (Exception $e) {
+            $this->logger->error("Prediction failed", [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            throw $e;
+        }
+    }
 }
