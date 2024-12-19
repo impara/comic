@@ -119,49 +119,63 @@ try {
             if ($stripId) {
                 $stripStateFile = $tempPath . "strip_state_{$stripId}.json";
                 if (file_exists($stripStateFile)) {
-                    $stripState = json_decode(file_get_contents($stripStateFile), true);
-                    if ($stripState) {
-                        // Update panel status in strip state
-                        if (isset($stripState['panels'])) {
-                            foreach ($stripState['panels'] as &$panel) {
-                                if ($panel['id'] === $originalPanelId) {
-                                    $panel['status'] = $data['status'];
-                                    $panel['updated_at'] = time();
-                                    if ($data['status'] === 'succeeded') {
-                                        $panel['completed_at'] = time();
-                                    } else if ($data['status'] === 'failed') {
-                                        $panel['failed_at'] = time();
-                                        $panel['error'] = $data['error'] ?? 'Unknown error';
+                    // Add file locking for strip state updates
+                    $stripLockFile = $tempPath . "strip_state_{$stripId}.lock";
+                    $stripFp = fopen($stripLockFile, 'w');
+                    if (!flock($stripFp, LOCK_EX)) {
+                        throw new Exception("Could not acquire lock for strip state file update");
+                    }
+
+                    try {
+                        $stripState = json_decode(file_get_contents($stripStateFile), true);
+                        if ($stripState) {
+                            // Update panel status in strip state
+                            if (isset($stripState['panels'])) {
+                                foreach ($stripState['panels'] as &$panel) {
+                                    if ($panel['id'] === $originalPanelId) {
+                                        $panel['status'] = $data['status'];
+                                        $panel['updated_at'] = time();
+                                        if ($data['status'] === 'succeeded') {
+                                            $panel['completed_at'] = time();
+                                        } else if ($data['status'] === 'failed') {
+                                            $panel['failed_at'] = time();
+                                            $panel['error'] = $data['error'] ?? 'Unknown error';
+                                        }
+                                        break;
                                     }
-                                    break;
                                 }
-                            }
 
-                            // Check if all panels are complete
-                            $allComplete = true;
-                            $anyFailed = false;
-                            foreach ($stripState['panels'] as $panel) {
-                                if ($panel['status'] === 'failed') {
-                                    $anyFailed = true;
-                                    break;
+                                // Check if all panels are complete
+                                $allComplete = true;
+                                $anyFailed = false;
+                                foreach ($stripState['panels'] as $panel) {
+                                    if ($panel['status'] === 'failed') {
+                                        $anyFailed = true;
+                                        break;
+                                    }
+                                    if ($panel['status'] !== 'succeeded') {
+                                        $allComplete = false;
+                                    }
                                 }
-                                if ($panel['status'] !== 'succeeded') {
-                                    $allComplete = false;
+
+                                if ($anyFailed) {
+                                    $stripState['status'] = 'failed';
+                                    $stripState['error'] = 'One or more panels failed to generate';
+                                    $stripState['failed_at'] = time();
+                                } else if ($allComplete) {
+                                    $stripState['status'] = 'completed';
+                                    $stripState['completed_at'] = time();
                                 }
-                            }
 
-                            if ($anyFailed) {
-                                $stripState['status'] = 'failed';
-                                $stripState['error'] = 'One or more panels failed to generate';
-                                $stripState['failed_at'] = time();
-                            } else if ($allComplete) {
-                                $stripState['status'] = 'completed';
-                                $stripState['completed_at'] = time();
+                                $stripState['updated_at'] = time();
+                                file_put_contents($stripStateFile, json_encode($stripState));
                             }
-
-                            $stripState['updated_at'] = time();
-                            file_put_contents($stripStateFile, json_encode($stripState));
                         }
+                    } finally {
+                        // Always release the lock
+                        flock($stripFp, LOCK_UN);
+                        fclose($stripFp);
+                        @unlink($stripLockFile);
                     }
                 }
             }
@@ -186,60 +200,74 @@ try {
 
             if ($currentStage === 'sdxl') {
                 // Handle SDXL completion
-                if ($data['status'] === 'succeeded' && !empty($data['output'])) {
-                    // Update state with success
-                    $state['sdxl_status'] = 'succeeded';
-                    $state['sdxl_output'] = is_array($data['output']) ? $data['output'][0] : $data['output'];
-                    $state['sdxl_completed_at'] = time();
-                    $state['status'] = 'succeeded';
-                    if (file_put_contents($stateFile, json_encode($state)) === false) {
-                        throw new Exception("Failed to update state file");
-                    }
+                // Add file locking for state updates
+                $lockFile = $tempPath . "state_{$originalPanelId}.lock";
+                $fp = fopen($lockFile, 'w');
+                if (!flock($fp, LOCK_EX)) {
+                    throw new Exception("Could not acquire lock for state file update");
+                }
 
-                    // Write final result
-                    $finalResult = [
-                        'id' => $originalPanelId,
-                        'status' => 'succeeded',
-                        'output' => $state['sdxl_output'],
-                        'completed_at' => date('c')
-                    ];
-                    if (file_put_contents($tempPath . "{$originalPanelId}.json", json_encode($finalResult)) === false) {
-                        throw new Exception("Failed to write final result file");
-                    }
+                try {
+                    if ($data['status'] === 'succeeded' && !empty($data['output'])) {
+                        // Update state with success
+                        $state['sdxl_status'] = 'succeeded';
+                        $state['sdxl_output'] = is_array($data['output']) ? $data['output'][0] : $data['output'];
+                        $state['sdxl_completed_at'] = time();
+                        $state['status'] = 'succeeded';
+                        if (file_put_contents($stateFile, json_encode($state)) === false) {
+                            throw new Exception("Failed to update state file");
+                        }
 
-                    $logger->error("TEST_LOG - Updated state file with SDXL completion", [
-                        'state_file' => basename($stateFile),
-                        'panel_id' => $originalPanelId,
-                        'sdxl_prediction_id' => $predictionId,
-                        'output_url' => $state['sdxl_output']
-                    ]);
-                } else if ($data['status'] === 'failed') {
-                    // Update state with failure
-                    $state['sdxl_status'] = 'failed';
-                    $state['sdxl_error'] = $data['error'] ?? 'SDXL generation failed';
-                    $state['sdxl_failed_at'] = time();
-                    $state['status'] = 'failed';
-                    if (file_put_contents($stateFile, json_encode($state)) === false) {
-                        throw new Exception("Failed to update state file with error");
-                    }
+                        // Write final result
+                        $finalResult = [
+                            'id' => $originalPanelId,
+                            'status' => 'succeeded',
+                            'output' => $state['sdxl_output'],
+                            'completed_at' => date('c')
+                        ];
+                        if (file_put_contents($tempPath . "{$originalPanelId}.json", json_encode($finalResult)) === false) {
+                            throw new Exception("Failed to write final result file");
+                        }
 
-                    // Write final result with error
-                    $finalResult = [
-                        'id' => $originalPanelId,
-                        'status' => 'failed',
-                        'error' => $state['sdxl_error'],
-                        'failed_at' => date('c')
-                    ];
-                    if (file_put_contents($tempPath . "{$originalPanelId}.json", json_encode($finalResult)) === false) {
-                        throw new Exception("Failed to write final error file");
-                    }
+                        $logger->error("TEST_LOG - Updated state file with SDXL completion", [
+                            'state_file' => basename($stateFile),
+                            'panel_id' => $originalPanelId,
+                            'sdxl_prediction_id' => $predictionId,
+                            'output_url' => $state['sdxl_output']
+                        ]);
+                    } else if ($data['status'] === 'failed') {
+                        // Update state with failure
+                        $state['sdxl_status'] = 'failed';
+                        $state['sdxl_error'] = $data['error'] ?? 'SDXL generation failed';
+                        $state['sdxl_failed_at'] = time();
+                        $state['status'] = 'failed';
+                        if (file_put_contents($stateFile, json_encode($state)) === false) {
+                            throw new Exception("Failed to update state file with error");
+                        }
 
-                    $logger->error("TEST_LOG - Updated state file with SDXL failure", [
-                        'state_file' => basename($stateFile),
-                        'panel_id' => $originalPanelId,
-                        'sdxl_prediction_id' => $predictionId,
-                        'error' => $state['sdxl_error']
-                    ]);
+                        // Write final result with error
+                        $finalResult = [
+                            'id' => $originalPanelId,
+                            'status' => 'failed',
+                            'error' => $state['sdxl_error'],
+                            'failed_at' => date('c')
+                        ];
+                        if (file_put_contents($tempPath . "{$originalPanelId}.json", json_encode($finalResult)) === false) {
+                            throw new Exception("Failed to write final error file");
+                        }
+
+                        $logger->error("TEST_LOG - Updated state file with SDXL failure", [
+                            'state_file' => basename($stateFile),
+                            'panel_id' => $originalPanelId,
+                            'sdxl_prediction_id' => $predictionId,
+                            'error' => $state['sdxl_error']
+                        ]);
+                    }
+                } finally {
+                    // Always release the lock
+                    flock($fp, LOCK_UN);
+                    fclose($fp);
+                    @unlink($lockFile);
                 }
 
                 // Clean up all pending files for this panel
@@ -339,20 +367,20 @@ try {
                                 $panelData = json_decode($panelData, true);
                             }
 
-                            if (!$panelData || !isset($panelData['scene_description'])) {
+                            if (!$panelData || !isset($panelData['story'])) {
                                 $logger->error("TEST_LOG - Panel data validation failed", [
                                     'panel_data_type' => gettype($panelData),
-                                    'has_scene_description' => isset($panelData['scene_description']),
+                                    'has_story' => isset($panelData['story']),
                                     'raw_panel_data' => $pending['panel_data']
                                 ]);
                                 throw new Exception("Invalid or missing panel data in pending file");
                             }
 
                             $logger->error("TEST_LOG - Starting SDXL with panel data", [
-                                'has_scene_description' => isset($panelData['scene_description']),
+                                'has_story' => isset($panelData['story']),
                                 'has_characters' => isset($panelData['characters']),
                                 'panel_id' => $originalPanelId,
-                                'scene_description' => $panelData['scene_description'],
+                                'story' => $panelData['story'],
                                 'character_style' => $panelData['characters'][0]['options']['style'] ?? 'modern',
                                 'has_character_options' => isset($panelData['characters'][0]['options']),
                                 'raw_character_data' => $panelData['characters'][0]
@@ -361,7 +389,7 @@ try {
                             // Start SDXL
                             $sdxlResult = $replicateClient->generateImage([
                                 'cartoonified_image' => $cartoonifiedUrl,
-                                'prompt' => $panelData['scene_description'],
+                                'prompt' => $panelData['story'],
                                 'original_panel_id' => $originalPanelId,
                                 'options' => [
                                     'style' => $panelData['characters'][0]['options']['style'] ?? 'modern'

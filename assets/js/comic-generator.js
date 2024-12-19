@@ -145,7 +145,7 @@ export const ComicGenerator = {
         // Collect form data
         const formData = {
             characters: characters,
-            scene_description: userStory,
+            story: userStory,
             art_style: selectedStyle
         };
 
@@ -173,7 +173,7 @@ export const ComicGenerator = {
     generateComic(formData) {
         // Detailed request logging
         console.log('Initiating comic generation with data:', {
-            story_length: formData.scene_description?.length,
+            story_length: formData.story?.length,
             art_style: formData.art_style,
             character_count: formData.characters?.length,
             characters: formData.characters,

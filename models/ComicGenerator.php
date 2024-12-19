@@ -241,6 +241,13 @@ class ComicGenerator
 
                 if ($cartoonificationResult['status'] === 'pending') {
                     $pendingCartoonifications[] = $cartoonificationResult['prediction_id'];
+                    // Create pending file with story
+                    $this->createPendingFile(
+                        $cartoonificationResult['prediction_id'],
+                        $panelId,
+                        $character,
+                        $sceneDescription
+                    );
                 } else {
                     $processedCharacters[] = $cartoonificationResult['character'];
                 }
@@ -480,7 +487,7 @@ class ComicGenerator
      * @param string $panelId Panel ID
      * @param array $character Character data
      */
-    private function createPendingFile(string $predictionId, string $panelId, array $character): void
+    private function createPendingFile(string $predictionId, string $panelId, array $character, string $story = null): void
     {
         $pendingFile = $this->config->getTempPath() . "pending_{$predictionId}.json";
         file_put_contents($pendingFile, json_encode([
@@ -490,6 +497,11 @@ class ComicGenerator
             'next_stage' => 'sdxl',
             'character_id' => $character['id'],
             'character_data' => $character,
+            'panel_data' => [
+                'story' => $story,
+                'characters' => [$character],
+                'options' => $character['options'] ?? []
+            ],
             'started_at' => time()
         ]));
     }
