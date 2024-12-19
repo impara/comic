@@ -56,14 +56,14 @@ export const FormHandler = {
         // Navigation buttons
         $('#next-step-1').on('click', () => this.handleNextStep1());
         $('#next-step-2').on('click', () => this.handleNextStep2());
-        $('#back-step-2').on('click', () => UIManager.goToStep(1));
-        $('#back-step-3').on('click', () => UIManager.goToStep(2));
+        $('#back-step-2').on('click', () => this.handleBackStep(1));
+        $('#back-step-3').on('click', () => this.handleBackStep(2));
 
         // Add Pay Now button handler
         $('#payButton').on('click', (e) => {
             e.preventDefault();
             // Move to generation step
-            UIManager.goToStep(4);
+            this.handleNextStep2();
             UIManager.showGeneratingState();
             // Use the ComicGenerator to handle the generation
             ComicGenerator.handleComicGeneration(e);
@@ -613,24 +613,19 @@ export const FormHandler = {
     },
 
     handleNextStep1() {
-        const story = $('#story-input').val().trim();
-
-        if (story.length >= this.minChars) {
-            sessionStorage.setItem('userStory', story);
-            UIManager.goToStep(2);
+        if (this.validateStep1()) {
+            document.dispatchEvent(new CustomEvent('changeStep', { detail: { step: 2 } }));
         }
     },
 
     handleNextStep2() {
-        if (this.selectedStyle && this.selectedCharacters.length > 0 && this.selectedBackground) {
-            // Store selections
-            sessionStorage.setItem('selectedStyle', this.selectedStyle);
-            sessionStorage.setItem('selectedCharacters', JSON.stringify(this.selectedCharacters));
-            sessionStorage.setItem('selectedBackground', this.selectedBackground);
-
-            UIManager.goToStep(3);
-            this.updateReviewSection();
+        if (this.validateStep2()) {
+            document.dispatchEvent(new CustomEvent('changeStep', { detail: { step: 3 } }));
         }
+    },
+
+    handleBackStep(step) {
+        document.dispatchEvent(new CustomEvent('changeStep', { detail: { step: step } }));
     },
 
     updateReviewSection() {
@@ -722,35 +717,18 @@ export const FormHandler = {
     },
 
     updateFormState() {
-        const characterData = JSON.parse(sessionStorage.getItem('characterData') || '{}');
-        const hasCharacters = Object.keys(characterData).length > 0;
-        const hasStory = sessionStorage.getItem('userStory');
-        const hasStyle = sessionStorage.getItem('selectedStyle');
-        const hasBackground = sessionStorage.getItem('selectedBackground');
+        const formState = {
+            story: $('#story-input').val(),
+            style: sessionStorage.getItem('selectedStyle'),
+            characters: JSON.parse(sessionStorage.getItem('characterData') || '{}'),
+            background: sessionStorage.getItem('selectedBackground')
+        };
 
-        // Update character status
-        const charactersStatus = $('#charactersStatus');
-        if (hasCharacters && this.selectedCharacters.length > 0) {
-            charactersStatus.removeClass('text-danger').addClass('text-success')
-                .html('<i class="fas fa-check-circle"></i>');
-        } else {
-            charactersStatus.removeClass('text-success').addClass('text-danger')
-                .html('<i class="fas fa-times-circle"></i>');
-        }
-
-        // Update character tags visibility
-        const $customCharactersList = $('#customCharactersList');
-        if (!hasCharacters) {
-            $customCharactersList.html('<div class="text-muted">No characters uploaded yet</div>');
-        }
-
-        // Enable/disable next button based on all requirements
-        const nextButton = $('#next-step-2');
-        if (hasCharacters && hasStyle && hasBackground && this.selectedCharacters.length > 0) {
-            nextButton.prop('disabled', false);
-        } else {
-            nextButton.prop('disabled', true);
-        }
+        // Dispatch form state change event
+        const event = new CustomEvent('formStateChanged', {
+            detail: formState
+        });
+        document.dispatchEvent(event);
     },
 
     // Add event handler for character removal

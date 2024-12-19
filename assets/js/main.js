@@ -4,21 +4,27 @@ import { FormHandler } from './form-handler.js';
 import { ComicGenerator } from './comic-generator.js';
 
 $(document).ready(function () {
+    // Initialize UI manager first
+    UIManager.init();
+
     // Initialize form handler
     FormHandler.init();
     FormHandler.initializeCharacterGrid();
     FormHandler.initializeEventHandlers();
     FormHandler.updateFormState();
 
-    // Initialize UI manager
-    UIManager.initializeSteps();
-    UIManager.updatePreview(FormHandler);
-
     // Initialize comic generator
     ComicGenerator.init();
 
     // Initialize example prompts
     initializeExamplePrompts();
+
+    // Set up step change listener
+    document.addEventListener('changeStep', (event) => {
+        if (event.detail && typeof event.detail.step === 'number') {
+            UIManager.goToStep(event.detail.step);
+        }
+    });
 });
 
 function initializeExamplePrompts() {

@@ -1,6 +1,10 @@
 export const UIManager = {
     init() {
         this.initializeProgressBar();
+        // Initialize preview update listener
+        document.addEventListener('formStateChanged', (event) => {
+            this.updatePreview(event.detail);
+        });
     },
 
     initializeProgressBar() {
@@ -105,7 +109,7 @@ export const UIManager = {
         $('#generateButton').prop('disabled', false).show();
     },
 
-    updatePreview(formHandler) {
+    updatePreview(formState) {
         const preview = $('#comicPreview');
         const characterData = JSON.parse(sessionStorage.getItem('characterData') || '{}');
         const hasCharacters = Object.keys(characterData).length > 0;
