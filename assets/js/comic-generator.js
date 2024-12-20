@@ -78,19 +78,22 @@ export const ComicGenerator = {
         const userStory = sessionStorage.getItem('userStory');
         const selectedStyle = sessionStorage.getItem('selectedStyle');
         const selectedCharacterIds = JSON.parse(sessionStorage.getItem('selectedCharacters') || '[]');
+        const selectedBackground = sessionStorage.getItem('selectedBackground');
 
         // Debug: Log retrieved data
         console.log('Retrieved data:', {
             story: userStory,
             style: selectedStyle,
-            characterIds: selectedCharacterIds
+            characterIds: selectedCharacterIds,
+            background: selectedBackground
         });
 
-        if (!userStory || !selectedStyle || !selectedCharacterIds.length) {
+        if (!userStory || !selectedStyle || !selectedCharacterIds.length || !selectedBackground) {
             console.error('Missing required data:', {
                 hasStory: !!userStory,
                 hasStyle: !!selectedStyle,
-                characterCount: selectedCharacterIds.length
+                characterCount: selectedCharacterIds.length,
+                hasBackground: !!selectedBackground
             });
             this.handleGenerationError('Please complete all required steps before generating the comic.');
             return;
@@ -122,7 +125,8 @@ export const ComicGenerator = {
         const formData = {
             characters: characters,
             story: userStory,
-            art_style: selectedStyle
+            art_style: selectedStyle,
+            background: selectedBackground
         };
 
         // Generate the comic

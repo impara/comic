@@ -394,6 +394,9 @@ const FormHandler = {
         this.selectedBackground = $selected.data('background');
         this.selectedBackgroundImage = $selected.find('img').attr('src');
 
+        // Store background in session storage
+        sessionStorage.setItem('selectedBackground', this.selectedBackground);
+
         // Update preview immediately
         this.updateLivePreview();
     },

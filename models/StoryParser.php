@@ -160,8 +160,11 @@ EOT;
             'raw_response' => $response
         ]);
 
+        // First, try to split panels that are in the same line
+        $response = preg_replace('/\. Panel (\d+):/', ".\nPanel $1:", $response);
+
         // Remove any text after the last panel (like "I hope this breakdown is helpful...")
-        if (preg_match('/(.*Panel \d+:.*\.)\s*\n/s', $response, $matches)) {
+        if (preg_match('/(.*Panel \d+:.*?\.)\s*(?:Panel|$)/s', $response, $matches)) {
             $response = $matches[1];
         }
 
@@ -171,8 +174,7 @@ EOT;
             function ($line) {
                 return !empty($line) &&
                     $line !== "\n" &&
-                    strlen($line) > 5 &&
-                    preg_match('/^Panel \d+:/i', $line); // Only keep lines starting with "Panel X:"
+                    strlen($line) > 5;
             }
         );
 
@@ -185,10 +187,13 @@ EOT;
         // Extract panel descriptions using regex
         $panels = [];
         foreach ($lines as $line) {
-            // Match "Panel X:" format, case insensitive
-            if (preg_match('/^panel\s*(\d+)\s*:\s*(.+)/i', $line, $matches)) {
-                $panelNumber = (int)$matches[1];
-                $description = trim($matches[2]);
+            // Try to extract multiple panels from a single line
+            $panelMatches = [];
+            preg_match_all('/Panel\s*(\d+)\s*:\s*([^.]+(?:\.[^.P]+)*)/i', $line . ' ', $panelMatches, PREG_SET_ORDER);
+
+            foreach ($panelMatches as $match) {
+                $panelNumber = (int)$match[1];
+                $description = trim($match[2]);
 
                 // Remove any trailing punctuation that might interfere with the next panel
                 $description = rtrim($description, " \t\n\r\0\x0B.,");
