@@ -6,9 +6,13 @@ const ENV = {
     browserSupportsModules: 'noModule' in HTMLScriptElement.prototype
 };
 
+// Generate a unique timestamp for this session
+const BUILD_TIME = new Date().getTime();
+
 // Configuration object
 export const CONFIG = {
     VERSION: '1.0.2',
+    BUILD_TIME,
     ENV,
     PATHS: {
         FORM_HANDLER: './form-handler.js',
@@ -33,17 +37,12 @@ export const CONFIG = {
         }
 
         try {
-            // Development: use timestamp for cache busting
-            if (this.ENV.isDev) {
-                return `${path}?v=${Date.now()}`;
-            }
-
-            // Production: use version number
-            return `${path}?v=${this.VERSION}`;
+            // Always use timestamp for aggressive cache busting
+            return `${path}?v=${this.VERSION}&t=${this.BUILD_TIME}`;
         } catch (error) {
             console.error('Error in getVersionedPath:', error);
-            // Fallback to unversioned path
-            return path;
+            // Fallback to timestamp only
+            return `${path}?t=${Date.now()}`;
         }
     },
     validateEnvironment() {
