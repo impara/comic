@@ -1,5 +1,5 @@
 import { CONFIG } from './config.js';
-import examples from './story-examples.js';
+import { storyExamples } from './story-examples.js';
 import { UIManager } from './ui-manager.js';
 import { FormHandler } from './form-handler.js';
 import { ComicGenerator } from './comic-generator.js';
@@ -7,7 +7,7 @@ import { SharingManager } from './sharing.js';
 
 // Add version info to loaded modules
 const loadedModules = {
-    storyExamples: examples,
+    storyExamples,
     UIManager,
     FormHandler,
     ComicGenerator,
@@ -96,7 +96,7 @@ class App {
         const examplePromptsList = document.getElementById('examplePromptsList');
         if (!examplePromptsList) return;
 
-        examples.forEach(example => {
+        storyExamples.forEach(example => {
             const li = document.createElement('li');
             li.className = 'mb-3';
 
