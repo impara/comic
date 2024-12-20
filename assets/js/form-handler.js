@@ -146,6 +146,11 @@ const FormHandler = {
             // Log the data being sent
             console.log('Sending comic generation data:', formData);
 
+            // Initialize ComicGenerator if not already initialized
+            if (!ComicGenerator.uiManager) {
+                ComicGenerator.init();
+            }
+
             // Call generateStrip with the form data
             ComicGenerator.generateStrip(formData.story, formData.characters, {
                 art_style: formData.art_style,
