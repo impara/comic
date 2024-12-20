@@ -146,8 +146,12 @@ const FormHandler = {
             // Log the data being sent
             console.log('Sending comic generation data:', formData);
 
-            // Call generateComic directly with the form data
-            ComicGenerator.generateComic(formData);
+            // Call generateStrip with the form data
+            ComicGenerator.generateStrip(formData.story, formData.characters, {
+                art_style: formData.art_style,
+                background: formData.background,
+                metadata: formData.metadata
+            });
         });
     },
 
