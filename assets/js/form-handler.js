@@ -136,15 +136,19 @@ const FormHandler = {
                 story: userStory,
                 style: selectedStyle,
                 background: selectedBackground,
-                // Add any additional metadata
                 metadata: {
                     created_at: new Date().toISOString(),
                     version: '1.0.2'
                 }
             };
 
-            // Log the data being sent
-            console.log('Sending comic generation data:', formData);
+            // Enhanced logging
+            console.log('Comic generation data:', {
+                characters: formData.characters.length,
+                storyLength: formData.story.length,
+                style: formData.style,
+                background: formData.background
+            });
 
             // Initialize ComicGenerator if not already initialized
             if (!ComicGenerator.uiManager) {

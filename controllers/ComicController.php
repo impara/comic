@@ -104,6 +104,16 @@ class ComicController
      */
     private function validateInput(array $input): void
     {
+        $this->logger->info('Validating comic generation input', [
+            'input_keys' => array_keys($input),
+            'style' => $input['style'] ?? 'not set',
+            'valid_styles' => self::VALID_STYLES,
+            'background' => $input['background'] ?? 'not set',
+            'valid_backgrounds' => self::VALID_BACKGROUNDS,
+            'character_count' => count($input['characters'] ?? []),
+            'story_length' => strlen($input['story'] ?? '')
+        ]);
+
         // Validate story
         if (empty($input['story'])) {
             throw new RuntimeException('Story is required');
@@ -115,6 +125,10 @@ class ComicController
 
         // Validate style
         if (empty($input['style']) || !in_array($input['style'], self::VALID_STYLES)) {
+            $this->logger->error('Invalid art style', [
+                'provided_style' => $input['style'] ?? 'not set',
+                'valid_styles' => self::VALID_STYLES
+            ]);
             throw new RuntimeException('Invalid or missing art style. Valid styles are: ' . implode(', ', self::VALID_STYLES));
         }
 

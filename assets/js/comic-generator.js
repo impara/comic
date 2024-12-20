@@ -24,7 +24,13 @@ export const ComicGenerator = {
                     'Content-Type': 'application/json',
                     'Accept': 'application/json'
                 },
-                body: JSON.stringify({ story, characters, options })
+                body: JSON.stringify({
+                    story,
+                    characters,
+                    style: options.style,
+                    background: options.background,
+                    metadata: options.metadata
+                })
             });
 
             const result = await response.json();
