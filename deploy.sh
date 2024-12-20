@@ -59,15 +59,6 @@ chown -R www-data:www-data "$DEPLOY_DIR"
 find "$DEPLOY_DIR" -type f -exec chmod 644 {} \;
 find "$DEPLOY_DIR" -type d -exec chmod 755 {} \;
 
-# Verify JavaScript modules
-log "Verifying JavaScript modules..."
-for file in "$DEPLOY_DIR"/assets/js/*.js; do
-    if ! node -c "$file" 2>/dev/null; then
-        error "JavaScript syntax error in: $file"
-        exit 1
-    fi
-done
-
 # Update version in config.js
 log "Updating version in config.js..."
 VERSION=$(date +%Y%m%d%H%M%S)

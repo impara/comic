@@ -1,4 +1,15 @@
 class CharacterSelector {
+    constructor(maxCharacters = 4) {
+        this.maxCharacters = maxCharacters;
+        this.selectedCharacters = JSON.parse(sessionStorage.getItem('selectedCharacters') || '[]');
+        this.initializeEventListeners();
+        this.updateCharacterCount();
+    }
+
+    initializeEventListeners() {
+        $('.character-option').on('click', (e) => this.handleCharacterSelection(e));
+    }
+
     handleCharacterSelection(e) {
         const characterOption = $(e.currentTarget);
         const characterId = characterOption.data('character-id');
@@ -36,4 +47,25 @@ class CharacterSelector {
         // Update UI
         this.updateCharacterCount();
     }
+
+    updateCharacterCount() {
+        const count = this.selectedCharacters.length;
+        $('#selected-character-count').text(count);
+        $('#max-character-count').text(this.maxCharacters);
+
+        // Update next button state
+        const nextButton = $('#next-step-1');
+        if (count > 0 && count <= this.maxCharacters) {
+            nextButton.prop('disabled', false);
+        } else {
+            nextButton.prop('disabled', true);
+        }
+    }
+
+    getSelectedCharacters() {
+        return this.selectedCharacters;
+    }
 }
+
+// Export the class
+export { CharacterSelector };
