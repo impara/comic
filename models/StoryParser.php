@@ -88,32 +88,38 @@ class StoryParser implements StoryParserInterface
     {
         // Create a detailed prompt for the NLP model
         return <<<EOT
-You are a comic book artist breaking down a story into sequential panels. Your task is to divide the following story into exactly {$panelCount} comic panels.
+You are a comic book artist breaking down a story into sequential panels. Your task is to divide the following story into exactly {$panelCount} comic panels, even if the story is short or abstract.
 
 Instructions:
 1. Create EXACTLY {$panelCount} panels - no more, no less
 2. Each panel must be a clear, visual description that an artist can illustrate
-3. Focus on actions, expressions, and visual elements
-4. Maintain story continuity between panels
-5. Include the setting and context where relevant
-6. Keep descriptions concise but specific
+3. Focus on key moments, actions, expressions, and visual elements
+4. For short stories, break down moments into:
+   - Setting establishment
+   - Character introduction
+   - Key action or discovery moment
+   - Emotional reaction or consequence
+   - Resolution or final state
+5. Keep descriptions specific and illustratable
 
-Response Format:
-You must respond using this exact format:
-Panel 1: [Description of the first visual scene]
-Panel 2: [Description of the second visual scene]
-[Continue until panel {$panelCount}]
+Response Format Example for a short story:
+Panel 1: [Establish the setting/scene visually]
+Panel 2: [Show character's initial state/action]
+Panel 3: [Depict the key moment/discovery]
+Panel 4: [Show the reaction/consequence]
+Panel 5: [Illustrate the resolution]
 
-Important:
-- Start each line with "Panel X: "
-- Number panels sequentially from 1 to {$panelCount}
-- Do not include any other text or explanations
-- Ensure each panel advances the story visually
+Important Rules:
+1. Start each line with "Panel X: " where X is the panel number
+2. Number panels sequentially from 1 to {$panelCount}
+3. Do not include any other text or explanations
+4. Each panel must be on its own line
+5. Each panel must be a concrete, visual scene
 
 Story to divide:
 {$story}
 
-Now, divide this story into exactly {$panelCount} panels:
+Remember: I need EXACTLY {$panelCount} panels, each starting with "Panel X: ". Focus on making each panel visually distinct and concrete. Begin your response now:
 EOT;
     }
 
@@ -137,7 +143,7 @@ EOT;
         $lines = array_filter(
             array_map('trim', explode("\n", $response)),
             function ($line) {
-                return !empty($line) && $line !== "\n";
+                return !empty($line) && $line !== "\n" && strlen($line) > 5;
             }
         );
 
@@ -150,10 +156,19 @@ EOT;
         // Extract panel descriptions using regex
         $panels = [];
         foreach ($lines as $line) {
-            // Match both "Panel X:" and "X:" formats
-            if (preg_match('/(?:Panel\s*)?(\d+):\s*(.+)/i', $line, $matches)) {
+            // Match both "Panel X:" and "X:" formats, case insensitive
+            if (preg_match('/^(?:panel\s*)?(\d+)\s*:\s*(.+)/i', $line, $matches)) {
                 $panelNumber = (int)$matches[1];
                 $description = trim($matches[2]);
+
+                // Validate panel description
+                if (strlen($description) < 10) {
+                    $this->logger->warning('Skipping too short panel description', [
+                        'panel' => $panelNumber,
+                        'description' => $description
+                    ]);
+                    continue;
+                }
 
                 // Store panel with its number for proper ordering
                 $panels[$panelNumber] = $description;
@@ -173,6 +188,18 @@ EOT;
                 'response' => $response
             ]);
             throw new RuntimeException('Failed to extract any valid panels from NLP response');
+        }
+
+        // Validate panel sequence
+        $expectedCount = max(array_keys($panels));
+        for ($i = 1; $i <= $expectedCount; $i++) {
+            if (!isset($panels[$i])) {
+                $this->logger->error('Missing panel in sequence', [
+                    'missing_panel' => $i,
+                    'available_panels' => array_keys($panels)
+                ]);
+                throw new RuntimeException("Missing panel {$i} in the sequence");
+            }
         }
 
         // Sort panels by number and return just the descriptions
@@ -232,38 +259,53 @@ EOT;
 
     public function getOptimalPanelCount(string $story): int
     {
-        // Get configuration limits
-        $minPanels = $this->config->get('comic_strip.min_panels');
-        $maxPanels = $this->config->get('comic_strip.max_panels');
-
-        // Calculate based on story length and complexity
-        $wordCount = str_word_count($story);
-        $sentenceCount = preg_match_all('/[.!?]+/', $story, $matches);
-        $dialogueCount = preg_match_all('/["\'](.*?)[\'"]/i', $story, $matches);
-
-        // Enhanced heuristic:
-        // - Base count: 1 panel per 1.5-2 sentences (more panels for shorter stories)
-        // - Minimum 2 panels for any story
-        // - Adjust for dialogue density
-        // - Consider word count for complexity
-        $baseCount = max(2, ceil($sentenceCount / 1.5));
-        $dialogueAdjustment = ceil($dialogueCount / 2);
-        $wordCountAdjustment = $wordCount > 50 ? ceil(($wordCount - 50) / 30) : 0;
-        $suggestedCount = $baseCount + $dialogueAdjustment + $wordCountAdjustment;
-
-        // Ensure within limits
-        $suggestedCount = max($minPanels, min($maxPanels, $suggestedCount));
-
-        $this->logger->info('Calculated optimal panel count', [
-            'word_count' => $wordCount,
-            'sentence_count' => $sentenceCount,
-            'dialogue_count' => $dialogueCount,
-            'base_count' => $baseCount,
-            'dialogue_adjustment' => $dialogueAdjustment,
-            'word_count_adjustment' => $wordCountAdjustment,
-            'final_count' => $suggestedCount
+        $this->logger->info('Calculating optimal panel count', [
+            'story_length' => strlen($story)
         ]);
 
-        return $suggestedCount;
+        // Count sentences (roughly)
+        $sentences = array_filter(array_map('trim', preg_split('/[.!?]+/', $story)));
+        $sentenceCount = count($sentences);
+
+        // Count potential scene transitions (indicated by certain words)
+        $transitionWords = [
+            'while',
+            'when',
+            'after',
+            'before',
+            'then',
+            'finally',
+            'meanwhile',
+            'suddenly',
+            'later',
+            'next',
+            'soon',
+            'discover',
+            'find',
+            'encounter',
+            'meet',
+            'learn'
+        ];
+        $transitionCount = 0;
+        foreach ($transitionWords as $word) {
+            $transitionCount += substr_count(strtolower($story), $word);
+        }
+
+        // Base calculation
+        $baseCount = max(
+            2, // Minimum 2 panels
+            min(
+                6, // Maximum 6 panels
+                ceil($sentenceCount * 1.5) + $transitionCount
+            )
+        );
+
+        $this->logger->info('Panel count calculation', [
+            'sentence_count' => $sentenceCount,
+            'transition_count' => $transitionCount,
+            'base_count' => $baseCount
+        ]);
+
+        return $baseCount;
     }
 }
