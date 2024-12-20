@@ -57,19 +57,19 @@ export const FormHandler = {
         // Navigation buttons
         $('#next-step-1').on('click', (e) => {
             e.preventDefault();
-            FormHandler.handleNextStep1();
+            this.handleNextStep1();
         });
         $('#next-step-2').on('click', (e) => {
             e.preventDefault();
-            FormHandler.handleNextStep2();
+            this.handleNextStep2();
         });
         $('#back-step-2').on('click', (e) => {
             e.preventDefault();
-            FormHandler.handleBackStep(1);
+            this.handleBackStep(1);
         });
         $('#back-step-3').on('click', (e) => {
             e.preventDefault();
-            FormHandler.handleBackStep(2);
+            this.handleBackStep(2);
         });
 
         // Add Pay Now button handler
@@ -626,13 +626,13 @@ export const FormHandler = {
     },
 
     handleNextStep1() {
-        if (FormHandler.validateStep1()) {
+        if (this.validateStep1()) {
             document.dispatchEvent(new CustomEvent('changeStep', { detail: { step: 2 } }));
         }
     },
 
     handleNextStep2() {
-        if (FormHandler.validateStep2()) {
+        if (this.validateStep2()) {
             document.dispatchEvent(new CustomEvent('changeStep', { detail: { step: 3 } }));
         }
     },
