@@ -55,10 +55,22 @@ export const FormHandler = {
         $('#characterName').on('input', (e) => this.handleCharacterNameInput(e));
 
         // Navigation buttons
-        $('#next-step-1').on('click', () => this.handleNextStep1());
-        $('#next-step-2').on('click', () => this.handleNextStep2());
-        $('#back-step-2').on('click', () => this.handleBackStep(1));
-        $('#back-step-3').on('click', () => this.handleBackStep(2));
+        $('#next-step-1').on('click', (e) => {
+            e.preventDefault();
+            FormHandler.handleNextStep1();
+        });
+        $('#next-step-2').on('click', (e) => {
+            e.preventDefault();
+            FormHandler.handleNextStep2();
+        });
+        $('#back-step-2').on('click', (e) => {
+            e.preventDefault();
+            FormHandler.handleBackStep(1);
+        });
+        $('#back-step-3').on('click', (e) => {
+            e.preventDefault();
+            FormHandler.handleBackStep(2);
+        });
 
         // Add Pay Now button handler
         $('#payButton').on('click', (e) => {
