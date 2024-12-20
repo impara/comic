@@ -1,64 +1,131 @@
-import storyExamples from './story-examples.js';
+import { CONFIG } from './config.js';
+import { storyExamples } from './story-examples.js';
 import { UIManager } from './ui-manager.js';
-import { FormHandler } from './form-handler.js?v=1.0.2';
+import { FormHandler } from './form-handler.js';
 import { ComicGenerator } from './comic-generator.js';
+import { SharingManager } from './sharing.js';
 
-$(document).ready(function () {
-    // Initialize UI manager first
-    UIManager.init();
+// Add version info to loaded modules
+const loadedModules = {
+    storyExamples,
+    UIManager,
+    FormHandler,
+    ComicGenerator,
+    SharingManager
+};
 
-    // Initialize form handler
-    FormHandler.init();
-    FormHandler.initializeCharacterGrid();
-    FormHandler.initializeEventHandlers();
-    FormHandler.updateFormState();
-
-    // Initialize comic generator
-    ComicGenerator.init();
-
-    // Initialize example prompts
-    initializeExamplePrompts();
-
-    // Set up step change listener
-    document.addEventListener('changeStep', (event) => {
-        if (event.detail && typeof event.detail.step === 'number') {
-            UIManager.goToStep(event.detail.step);
-        }
-    });
+// Attach version to each module
+Object.entries(loadedModules).forEach(([name, module]) => {
+    if (module) {
+        module.version = CONFIG.VERSION;
+    }
 });
 
-function initializeExamplePrompts() {
-    const examplePromptsList = document.getElementById('examplePromptsList');
-    if (!examplePromptsList) return;
+class App {
+    static async init() {
+        try {
+            // Wait for DOM to be ready
+            await this.domReady();
 
-    storyExamples.forEach(example => {
-        const li = document.createElement('li');
-        li.className = 'mb-3';
+            // Log loaded modules versions
+            console.log('Loaded modules:', Object.entries(loadedModules)
+                .map(([name, module]) => `${name}@${module?.version || 'unknown'}`));
 
-        li.innerHTML = `
-            <div class="example-prompt p-3 rounded bg-white shadow-sm cursor-pointer">
-                <h6 class="mb-2">${example.title}</h6>
-                <p class="mb-0">${example.text}</p>
-            </div>
-        `;
+            // Initialize in specific order
+            await UIManager.init();
+            await FormHandler.init();
+            await FormHandler.initializeCharacterGrid();
+            await FormHandler.initializeEventHandlers();
+            await FormHandler.updateFormState();
+            await ComicGenerator.init();
+            await SharingManager.init();
 
-        // Add click handler to populate the story input
-        li.addEventListener('click', () => {
-            const $storyInput = $('#story-input');
-            $storyInput.val(example.text);
-            // Trigger input event to update character count
-            $storyInput[0].dispatchEvent(new Event('input'));
-            // Collapse the examples panel
-            const examplesCollapse = bootstrap.Collapse.getInstance(document.getElementById('examplePrompts'));
-            if (examplesCollapse) {
-                examplesCollapse.hide();
-            }
-            // Scroll to textarea
-            $('html, body').animate({
-                scrollTop: $storyInput.offset().top - 100
-            }, 500);
+            // Initialize examples after core functionality
+            this.initializeExamplePrompts();
+
+            // Set up global event listeners
+            this.setupEventListeners();
+
+            console.log(`App initialized successfully (v${CONFIG.VERSION})`);
+        } catch (error) {
+            console.error('Error initializing app:', error);
+            // Add error reporting
+            this.reportError(error);
+        }
+    }
+
+    static reportError(error) {
+        // Log to console with stack trace
+        console.error('Detailed error:', {
+            message: error.message,
+            stack: error.stack,
+            timestamp: new Date().toISOString()
         });
 
-        examplePromptsList.appendChild(li);
-    });
+        // Show user-friendly error message
+        const errorContainer = document.getElementById('error-container');
+        if (errorContainer) {
+            errorContainer.innerHTML = `
+                <div class="alert alert-danger">
+                    An error occurred while loading the application. 
+                    Please refresh the page or contact support if the problem persists.
+                </div>
+            `;
+        }
+    }
+
+    static domReady() {
+        return new Promise(resolve => {
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', resolve);
+            } else {
+                resolve();
+            }
+        });
+    }
+
+    static setupEventListeners() {
+        document.addEventListener('changeStep', (event) => {
+            if (event.detail && typeof event.detail.step === 'number') {
+                UIManager.goToStep(event.detail.step);
+            }
+        });
+    }
+
+    static initializeExamplePrompts() {
+        const examplePromptsList = document.getElementById('examplePromptsList');
+        if (!examplePromptsList) return;
+
+        storyExamples.forEach(example => {
+            const li = document.createElement('li');
+            li.className = 'mb-3';
+
+            li.innerHTML = `
+                <div class="example-prompt p-3 rounded bg-white shadow-sm cursor-pointer">
+                    <h6 class="mb-2">${example.title}</h6>
+                    <p class="mb-0">${example.text}</p>
+                </div>
+            `;
+
+            li.addEventListener('click', () => {
+                const storyInput = document.getElementById('story-input');
+                if (storyInput) {
+                    storyInput.value = example.text;
+                    storyInput.dispatchEvent(new Event('input'));
+
+                    const examplesCollapse = bootstrap.Collapse.getInstance(document.getElementById('examplePrompts'));
+                    if (examplesCollapse) {
+                        examplesCollapse.hide();
+                    }
+
+                    storyInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            });
+
+            examplePromptsList.appendChild(li);
+        });
+    }
 }
+
+// Initialize the app
+App.init();
