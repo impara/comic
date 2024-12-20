@@ -18,9 +18,12 @@ export const ComicGenerator = {
      */
     async generateStrip(story, characters, options = {}) {
         try {
-            const response = await fetch('/api/generate', {
+            const response = await fetch('/api.php', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                },
                 body: JSON.stringify({ story, characters, options })
             });
 
