@@ -29,6 +29,29 @@ warn() {
     echo -e "${YELLOW}[WARNING] $1${NC}"
 }
 
+# Function to set ownership for git operations
+set_git_ownership() {
+    log "Setting ownership for git operations..."
+    chown -R $SERVER_USER:$SERVER_GROUP "$DEPLOY_DIR"
+}
+
+# Function to set ownership for web server
+set_web_ownership() {
+    log "Setting ownership for web server..."
+    # Set web directory ownership
+    find "$DEPLOY_DIR" -path "$DEPLOY_DIR/.git" -prune -o -type f -exec chown www-data:www-data {} \;
+    find "$DEPLOY_DIR" -path "$DEPLOY_DIR/.git" -prune -o -type d -exec chown www-data:www-data {} \;
+    
+    # Keep git directory owned by server user
+    chown -R $SERVER_USER:$SERVER_GROUP "$DEPLOY_DIR/.git"
+    
+    # Set special permissions for writable directories
+    chmod 775 "$DEPLOY_DIR/logs"
+    chmod 775 "$DEPLOY_DIR/public/temp"
+    chown -R www-data:www-data "$DEPLOY_DIR/logs"
+    chown -R www-data:www-data "$DEPLOY_DIR/public/temp"
+}
+
 # Check if running as root
 if [ "$EUID" -ne 0 ]; then 
     error "Please run as root"
@@ -55,22 +78,19 @@ service php8.4-fpm reload
 log "Clearing server-side cache..."
 rm -rf "$DEPLOY_DIR/public/temp/*"
 
-# Update file permissions
-log "Updating file permissions..."
-# First, set ownership of .git directory to server user
-chown -R $SERVER_USER:$SERVER_GROUP "$DEPLOY_DIR/.git"
-chmod -R 775 "$DEPLOY_DIR/.git"
+# Set ownership for git operations
+set_git_ownership
 
-# Then set permissions for web files
-find "$DEPLOY_DIR" -path "$DEPLOY_DIR/.git" -prune -o -type f -exec chown www-data:www-data {} \; -exec chmod 644 {} \;
-find "$DEPLOY_DIR" -path "$DEPLOY_DIR/.git" -prune -o -type d -exec chown www-data:www-data {} \; -exec chmod 755 {} \;
+# Prompt for git operations
+read -p "Do you want to perform git operations now? (y/n) " -n 1 -r
+echo
+if [[ $REPLY =~ ^[Yy]$ ]]; then
+    log "Please perform your git operations now and press Enter when done..."
+    read
+fi
 
-# Special handling for directories that need write access
-log "Setting up special permissions..."
-chmod 775 "$DEPLOY_DIR/logs"
-chmod 775 "$DEPLOY_DIR/public/temp"
-chown -R www-data:www-data "$DEPLOY_DIR/logs"
-chown -R www-data:www-data "$DEPLOY_DIR/public/temp"
+# Reset ownership for web server
+set_web_ownership
 
 # Update version in config.js
 log "Updating version in config.js..."
@@ -114,3 +134,6 @@ log "Verifying final permissions..."
 if [ ! -w "$DEPLOY_DIR/.git" ]; then
     warn "Git directory may not be writable by $SERVER_USER"
 fi
+
+log "Deployment process complete. File ownership has been set for web server operation."
+log "To perform git operations, run the script again and select 'y' when prompted."
