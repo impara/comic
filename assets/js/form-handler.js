@@ -134,7 +134,7 @@ const FormHandler = {
             const formData = {
                 characters: characters,
                 story: userStory,
-                art_style: selectedStyle,
+                style: selectedStyle,
                 background: selectedBackground,
                 // Add any additional metadata
                 metadata: {
@@ -153,7 +153,7 @@ const FormHandler = {
 
             // Call generateStrip with the form data
             ComicGenerator.generateStrip(formData.story, formData.characters, {
-                art_style: formData.art_style,
+                style: formData.style,
                 background: formData.background,
                 metadata: formData.metadata
             });

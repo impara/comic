@@ -31,10 +31,12 @@ export const ComicGenerator = {
             if (result.success) {
                 this.handleGenerationStart(result.data);
             } else {
-                this.handleGenerationError(result.message);
+                // Handle error from backend
+                this.handleGenerationError(result.error || 'An unexpected error occurred');
             }
         } catch (error) {
-            this.handleGenerationError(error.message);
+            console.error('Comic generation error:', error);
+            this.handleGenerationError('Failed to connect to the server. Please try again.');
         }
     },
 
@@ -51,8 +53,14 @@ export const ComicGenerator = {
      * Handle generation error
      */
     handleGenerationError(message) {
+        console.error('Generation error:', message);
         this.stopProgressPolling();
-        this.uiManager.showError(message);
+        if (this.uiManager) {
+            this.uiManager.showError(message);
+        } else {
+            console.error('UIManager not initialized');
+            alert(message); // Fallback if UIManager is not available
+        }
     },
 
     /**
