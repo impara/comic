@@ -152,11 +152,12 @@ export const ComicGenerator = {
         // Add loading indicator to UI
         $('#debugInfo').html('<p>Sending request to server...</p>');
 
-        // Ensure story parameter is correctly named
+        // Ensure all parameters are included
         const requestPayload = {
             characters: formData.characters,
             story: formData.story,
-            art_style: formData.art_style
+            art_style: formData.art_style,
+            background: formData.background  // Add background to payload
         };
 
         // Log the exact payload that will be sent

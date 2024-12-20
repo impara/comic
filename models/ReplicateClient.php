@@ -72,11 +72,12 @@ class ReplicateClient
      * @return array Cartoonified image data
      * @throws Exception if cartoonification fails
      */
-    public function cartoonify(string $image, array $options = []): array
+    public function cartoonify(string $image, array $options = [], ?string $originalPanelId = null)
     {
-        $this->logger->info("Cartoonifying image", [
-            'image_length' => strlen($image),
-            'options' => $options
+        $this->logger->info("Starting cartoonification", [
+            'image_type' => is_string($image) ? (strpos($image, 'data:image') === 0 ? 'base64' : 'url') : 'unknown',
+            'options' => $options,
+            'original_panel_id' => $originalPanelId
         ]);
 
         try {
@@ -126,14 +127,23 @@ class ReplicateClient
                 'webhook_events_filter' => ['completed']  // Only receive webhook when prediction is complete
             ]);
 
-            $this->logger->info("Image cartoonification initiated", [
-                'result' => $result,
-                'webhook_url' => $webhookUrl
-            ]);
+            // Create a pending file for webhook to handle cartoonification stage
+            if (!isset($result['output'])) {
+                $tempPath = $this->config->getTempPath();
+                $pendingFile = $tempPath . "pending_{$result['id']}.json";
+                $pendingData = [
+                    'prediction_id' => $result['id'],
+                    'original_panel_id' => $originalPanelId,
+                    'stage' => 'cartoonify',
+                    'created_at' => time(),
+                    'options' => $options
+                ];
+                file_put_contents($pendingFile, json_encode($pendingData));
+            }
 
             return $result;
         } catch (Exception $e) {
-            $this->logger->error("Failed to cartoonify image", [
+            $this->logger->error("Cartoonification failed", [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString()
             ]);
