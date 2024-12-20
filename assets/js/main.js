@@ -1,6 +1,6 @@
 import storyExamples from './story-examples.js';
 import { UIManager } from './ui-manager.js';
-import { FormHandler } from './form-handler.js';
+import { FormHandler } from './form-handler.js?v=1.0.2';
 import { ComicGenerator } from './comic-generator.js';
 
 $(document).ready(function () {

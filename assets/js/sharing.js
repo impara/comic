@@ -1,4 +1,4 @@
-import { FormHandler } from './form-handler.js';
+import { FormHandler } from './form-handler.js?v=1.0.2';
 
 export const SharingManager = {
     init() {
