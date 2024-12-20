@@ -2,14 +2,15 @@ import { UIManager } from './ui-manager.js';
 import { ComicGenerator } from './comic-generator.js';
 
 export const FormHandler = {
+    // Configuration
+    minChars: 50,
+    maxChars: 500,
     selectedStyle: null,
     selectedCharacters: [],
     selectedBackground: null,
     customCharacters: [],
     nextCustomId: 1000,
     maxCharacters: 2,
-    minChars: 50,
-    maxChars: 500,
     characters: [
         { id: 1, name: 'Hero', image: 'assets/characters/hero.png' },
         { id: 2, name: 'Sidekick', image: 'assets/characters/sidekick.png' },
@@ -1076,5 +1077,36 @@ export const FormHandler = {
         } else {
             UIManager.showError('Comic generation completed but no output URL found');
         }
+    },
+
+    validateStep1() {
+        const story = $('#story-input').val().trim();
+        if (story.length >= this.minChars && story.length <= this.maxChars) {
+            // Store story in session storage
+            sessionStorage.setItem('userStory', story);
+            return true;
+        }
+        return false;
+    },
+
+    validateStep2() {
+        const hasStyle = this.selectedStyle !== null;
+        const hasCharacters = this.selectedCharacters.length > 0;
+        const hasBackground = this.selectedBackground !== null;
+
+        if (hasStyle && hasCharacters && hasBackground) {
+            // Store selections
+            sessionStorage.setItem('selectedStyle', this.selectedStyle);
+            sessionStorage.setItem('selectedCharacters', JSON.stringify(this.selectedCharacters));
+            sessionStorage.setItem('selectedBackground', this.selectedBackground);
+            this.updateReviewSection();
+            return true;
+        }
+        return false;
+    },
+
+    validateStep3() {
+        // Add any step 3 validation logic here
+        return true;
     }
 }; 

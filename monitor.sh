@@ -1,1 +1,0 @@
-while true; do echo "Checking cartoonify result..."; curl -s https://comic.amertech.online/public/temp/ke5057dt1srmc0cksfv8sd0edm.json; echo -e "\n\nChecking scene result..."; curl -s https://comic.amertech.online/public/temp/qjerzsxv21rma0cksfv9gkkzt8.json; echo -e "\n\nWaiting 5 seconds...\n"; sleep 5; done
