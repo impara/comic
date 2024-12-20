@@ -367,6 +367,29 @@ class ReplicateClient
                             ]);
                             throw new RuntimeException("NLP model returned empty output");
                         }
+
+                        // Handle tokenized output
+                        if (is_array($status['output'])) {
+                            $this->logger->info("Processing tokenized NLP output", [
+                                'token_count' => count($status['output']),
+                                'first_tokens' => array_slice($status['output'], 0, 5)
+                            ]);
+
+                            // Join tokens and clean up any extra whitespace
+                            $joinedOutput = implode('', $status['output']);
+                            $cleanedOutput = preg_replace('/\s+/', ' ', $joinedOutput);
+                            $cleanedOutput = trim($cleanedOutput);
+
+                            // Log the processed output
+                            $this->logger->info("Processed NLP output", [
+                                'output_length' => strlen($cleanedOutput),
+                                'output_preview' => substr($cleanedOutput, 0, 100)
+                            ]);
+
+                            // Return as array to maintain compatibility
+                            return [$cleanedOutput];
+                        }
+
                         return $status['output'];
                     } elseif ($status['status'] === 'failed') {
                         $errorMsg = $status['error'] ?? 'Unknown error';

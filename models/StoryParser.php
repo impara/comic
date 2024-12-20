@@ -157,23 +157,22 @@ EOT;
     {
         $this->logger->info('Parsing NLP response', [
             'response_length' => strlen($response),
-            'raw_response' => $response // Log the actual response
+            'raw_response' => $response
         ]);
 
-        // Validate response is not empty or too short
-        if (empty($response) || strlen($response) < 10) {
-            $this->logger->error('Invalid NLP response', [
-                'response' => $response,
-                'length' => strlen($response)
-            ]);
-            throw new RuntimeException('NLP model returned an invalid or empty response');
+        // Remove any text after the last panel (like "I hope this breakdown is helpful...")
+        if (preg_match('/(.*Panel \d+:.*\.)\s*\n/s', $response, $matches)) {
+            $response = $matches[1];
         }
 
         // Split response into lines and clean up
         $lines = array_filter(
             array_map('trim', explode("\n", $response)),
             function ($line) {
-                return !empty($line) && $line !== "\n" && strlen($line) > 5;
+                return !empty($line) &&
+                    $line !== "\n" &&
+                    strlen($line) > 5 &&
+                    preg_match('/^Panel \d+:/i', $line); // Only keep lines starting with "Panel X:"
             }
         );
 
@@ -186,10 +185,13 @@ EOT;
         // Extract panel descriptions using regex
         $panels = [];
         foreach ($lines as $line) {
-            // Match both "Panel X:" and "X:" formats, case insensitive
-            if (preg_match('/^(?:panel\s*)?(\d+)\s*:\s*(.+)/i', $line, $matches)) {
+            // Match "Panel X:" format, case insensitive
+            if (preg_match('/^panel\s*(\d+)\s*:\s*(.+)/i', $line, $matches)) {
                 $panelNumber = (int)$matches[1];
                 $description = trim($matches[2]);
+
+                // Remove any trailing punctuation that might interfere with the next panel
+                $description = rtrim($description, " \t\n\r\0\x0B.,");
 
                 // Validate panel description
                 if (strlen($description) < 10) {
