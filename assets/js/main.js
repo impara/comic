@@ -4,8 +4,7 @@ window.addEventListener('error', (event) => {
         console.error('Module loading error:', {
             file: event.filename,
             line: event.lineno,
-            message: event.error.message,
-            stack: event.error.stack
+            message: event.error.message
         });
 
         // Show user-friendly error
@@ -64,21 +63,33 @@ class App {
             // Wait for DOM to be ready
             await this.domReady();
 
-            // Log loaded modules versions
-            console.log('Loaded modules:', Object.entries(loadedModules)
-                .map(([name, module]) => `${name}@${module?.version || 'unknown'}`));
+            // Determine current page
+            const currentPage = window.location.pathname.split('/').pop() || 'index.html';
 
-            // Initialize in specific order
+            // Initialize UI Manager for all pages
             await UIManager.init();
-            await FormHandler.init();
-            await FormHandler.initializeCharacterGrid();
-            await FormHandler.initializeEventHandlers();
-            await FormHandler.updateFormState();
-            await ComicGenerator.init();
-            await SharingManager.init();
 
-            // Initialize examples after core functionality
-            this.initializeExamplePrompts();
+            // Page-specific initialization
+            if (currentPage === 'input.html') {
+                // Input page specific modules
+                await FormHandler.init();
+                await FormHandler.initializeCharacterGrid();
+                await FormHandler.initializeEventHandlers();
+                await FormHandler.updateFormState();
+                await ComicGenerator.init();
+
+                // Initialize examples after core functionality
+                this.initializeExamplePrompts();
+            } else if (currentPage === 'index.html') {
+                // Index page specific modules
+                // Add any index-specific initialization here
+            }
+
+            // Initialize sharing only if the container exists
+            const sharingContainer = document.querySelector('.action-buttons');
+            if (sharingContainer) {
+                await SharingManager.init();
+            }
 
             // Set up global event listeners
             this.setupEventListeners();
@@ -86,19 +97,11 @@ class App {
             console.log(`App initialized successfully (v${CONFIG.VERSION})`);
         } catch (error) {
             console.error('Error initializing app:', error);
-            // Add error reporting
             this.reportError(error);
         }
     }
 
     static reportError(error) {
-        // Log to console with stack trace
-        console.error('Detailed error:', {
-            message: error.message,
-            stack: error.stack,
-            timestamp: new Date().toISOString()
-        });
-
         // Show user-friendly error message
         const errorContainer = document.getElementById('error-container');
         if (errorContainer) {

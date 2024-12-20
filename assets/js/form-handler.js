@@ -33,6 +33,10 @@ const FormHandler = {
 
         // Wait for DOM to be ready
         $(document).ready(() => {
+            // Check if we're on the input page
+            const $storyInput = $('#story-input');
+            if (!$storyInput.length) return;
+
             this.bindEvents();
             this.initializeCharacterCount();
             this.initializeFileUpload();
