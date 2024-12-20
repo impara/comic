@@ -42,22 +42,37 @@ class StoryParser implements StoryParserInterface
             $result = $this->replicateClient->predict('nlp', [
                 'prompt' => $prompt,
                 'max_length' => 2048,
-                'temperature' => 0.5,  // Lower temperature for more deterministic output
-                'top_p' => 0.9,       // Slightly higher top_p for more natural language
-                'repetition_penalty' => 1.1  // Lower repetition penalty for more natural responses
+                'temperature' => 0.75,  // Default temperature for more balanced output
+                'top_p' => 0.9,        // Standard top_p for natural language
+                'repetition_penalty' => 1.2  // Standard repetition penalty
             ]);
 
-            if (empty($result)) {
-                throw new RuntimeException('Failed to get valid response from NLP model');
+            if (empty($result) || !is_array($result) || empty($result[0])) {
+                $this->logger->error('Invalid NLP model response structure', [
+                    'result' => $result
+                ]);
+                throw new RuntimeException('NLP model returned an invalid response structure');
             }
 
             // Log the raw result
             $this->logger->info('Received NLP model response', [
-                'raw_result' => $result
+                'raw_result' => $result,
+                'response_text' => $result[0]
             ]);
 
             // Process and validate the segmented panels
             $panels = $this->parseNLPResponse($result[0]);
+
+            // Validate panel count
+            if (count($panels) < 2) {
+                $this->logger->error('Insufficient panels generated', [
+                    'panel_count' => count($panels),
+                    'panels' => $panels,
+                    'raw_response' => $result[0]
+                ]);
+                throw new RuntimeException('Not enough valid panels generated from NLP response');
+            }
+
             return $this->processPanelDescriptions($panels);
         } catch (Exception $e) {
             $this->logger->error('Story segmentation failed', [

@@ -372,6 +372,20 @@ class ReplicateClient
                             ]);
                             throw new RuntimeException("NLP model returned empty output");
                         }
+
+                        // For NLP model, ensure we have a string response
+                        if ($modelType === 'nlp') {
+                            if (!is_array($status['output']) || empty($status['output'][0]) || !is_string($status['output'][0])) {
+                                $this->logger->error("Invalid NLP model output format", [
+                                    'prediction_id' => $result['id'],
+                                    'output' => $status['output']
+                                ]);
+                                throw new RuntimeException("Invalid NLP model output format");
+                            }
+                            // Return just the string response
+                            return [$status['output'][0]];
+                        }
+
                         return $status['output'];
                     } elseif ($status['status'] === 'failed') {
                         $errorMsg = $status['error'] ?? 'Unknown error';
