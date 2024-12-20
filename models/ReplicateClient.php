@@ -354,15 +354,38 @@ class ReplicateClient
                 $attempt = 0;
                 while ($attempt < $maxAttempts) {
                     $status = $this->httpClient->get("https://api.replicate.com/v1/predictions/{$result['id']}");
+
+                    // Log detailed status information
+                    $this->logger->info("NLP model status check", [
+                        'attempt' => $attempt + 1,
+                        'prediction_id' => $result['id'],
+                        'status' => $status['status'],
+                        'raw_status' => $status,
+                        'error' => $status['error'] ?? null
+                    ]);
+
                     if ($status['status'] === 'succeeded') {
+                        if (empty($status['output'])) {
+                            $this->logger->error("NLP model returned empty output", [
+                                'prediction_id' => $result['id'],
+                                'status' => $status
+                            ]);
+                            throw new RuntimeException("NLP model returned empty output");
+                        }
                         return $status['output'];
                     } elseif ($status['status'] === 'failed') {
-                        throw new RuntimeException("Prediction failed: " . ($status['error'] ?? 'Unknown error'));
+                        $errorMsg = $status['error'] ?? 'Unknown error';
+                        $this->logger->error("NLP model prediction failed", [
+                            'prediction_id' => $result['id'],
+                            'error' => $errorMsg,
+                            'status' => $status
+                        ]);
+                        throw new RuntimeException("Prediction failed: " . $errorMsg);
                     }
                     $attempt++;
                     sleep(2);
                 }
-                throw new RuntimeException("Prediction timed out");
+                throw new RuntimeException("Prediction timed out after {$maxAttempts} attempts");
             }
 
             return $result;

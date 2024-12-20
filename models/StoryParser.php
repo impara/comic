@@ -73,31 +73,32 @@ class StoryParser implements StoryParserInterface
     {
         // Create a detailed prompt for the NLP model
         return <<<EOT
-Task: Divide this story into exactly {$panelCount} sequential comic panels.
+You are a comic book artist breaking down a story into sequential panels. Your task is to divide the following story into exactly {$panelCount} comic panels.
 
-Requirements:
-1. Each panel description must be visual and illustratable
-2. Maintain story continuity and flow between panels
-3. Include key actions, emotions, and settings
-4. Keep descriptions concise but detailed
-5. Focus on visual elements and actions
-6. For short stories, break down key moments into separate panels:
-   - Setting establishment
-   - Character introduction
-   - Action/conflict moments
-   - Resolution/emotional beats
+Instructions:
+1. Create EXACTLY {$panelCount} panels - no more, no less
+2. Each panel must be a clear, visual description that an artist can illustrate
+3. Focus on actions, expressions, and visual elements
+4. Maintain story continuity between panels
+5. Include the setting and context where relevant
+6. Keep descriptions concise but specific
 
-Format your response as:
-Panel 1: [visual description]
-Panel 2: [visual description]
-...and so on.
+Response Format:
+You must respond using this exact format:
+Panel 1: [Description of the first visual scene]
+Panel 2: [Description of the second visual scene]
+[Continue until panel {$panelCount}]
 
-For this story, ensure you create exactly {$panelCount} panels by breaking down the narrative into key visual moments, even if the story is short.
+Important:
+- Start each line with "Panel X: "
+- Number panels sequentially from 1 to {$panelCount}
+- Do not include any other text or explanations
+- Ensure each panel advances the story visually
 
-Story:
+Story to divide:
 {$story}
 
-Divide this into {$panelCount} panels:
+Now, divide this story into exactly {$panelCount} panels:
 EOT;
     }
 
