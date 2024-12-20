@@ -73,11 +73,74 @@ const FormHandler = {
         // Add Pay Now button handler
         $('#payButton').on('click', (e) => {
             e.preventDefault();
+
+            // Validate all required data is present
+            const userStory = sessionStorage.getItem('userStory');
+            const selectedStyle = sessionStorage.getItem('selectedStyle');
+            const selectedBackground = sessionStorage.getItem('selectedBackground');
+            const characterData = JSON.parse(sessionStorage.getItem('characterData') || '{}');
+
+            if (!userStory || !selectedStyle || !this.selectedCharacters.length || !selectedBackground) {
+                console.error('Missing required data:', {
+                    hasStory: !!userStory,
+                    hasStyle: !!selectedStyle,
+                    characterCount: this.selectedCharacters.length,
+                    hasBackground: !!selectedBackground
+                });
+                UIManager.showError('Please complete all required steps before generating the comic.');
+                return;
+            }
+
             // Move to generation step
-            this.handleNextStep2();
+            this.handleNextStep2(e);
             UIManager.showGeneratingState();
-            // Use the ComicGenerator to handle the generation
-            ComicGenerator.handleComicGeneration(e);
+
+            // Prepare character data
+            const characters = this.selectedCharacters.map(id => {
+                const char = characterData[id];
+                if (!char) {
+                    console.error('Character not found:', id);
+                    return null;
+                }
+                return {
+                    id: char.id,
+                    name: char.name,
+                    description: char.description || char.name,
+                    image: char.image,
+                    isCustom: char.isCustom,
+                    options: {
+                        style: selectedStyle,
+                        // Add any character-specific options here
+                        position: char.position || 'center',
+                        scale: char.scale || 1.0
+                    }
+                };
+            }).filter(Boolean);
+
+            // Validate we have valid characters
+            if (characters.length === 0) {
+                UIManager.showError('No valid characters selected. Please select at least one character.');
+                return;
+            }
+
+            // Get the form data and pass it directly to generate comic
+            const formData = {
+                characters: characters,
+                story: userStory,
+                art_style: selectedStyle,
+                background: selectedBackground,
+                // Add any additional metadata
+                metadata: {
+                    created_at: new Date().toISOString(),
+                    version: '1.0.2'
+                }
+            };
+
+            // Log the data being sent
+            console.log('Sending comic generation data:', formData);
+
+            // Call generateComic directly with the form data
+            ComicGenerator.generateComic(formData);
         });
     },
 

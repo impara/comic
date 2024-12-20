@@ -70,100 +70,39 @@ export const ComicGenerator = {
         }
     },
 
-    handleComicGeneration(e) {
-        e.preventDefault();
-        console.log('Comic generation started');
+    generateComic(formData) {
+        const apiUrl = this.getApiUrl('api.php');
+        console.log('Sending POST request to:', apiUrl);
 
-        // Get story and style from session storage
-        const userStory = sessionStorage.getItem('userStory');
-        const selectedStyle = sessionStorage.getItem('selectedStyle');
-        const selectedCharacterIds = JSON.parse(sessionStorage.getItem('selectedCharacters') || '[]');
-        const selectedBackground = sessionStorage.getItem('selectedBackground');
-
-        // Debug: Log retrieved data
-        console.log('Retrieved data:', {
-            story: userStory,
-            style: selectedStyle,
-            characterIds: selectedCharacterIds,
-            background: selectedBackground
-        });
-
-        if (!userStory || !selectedStyle || !selectedCharacterIds.length || !selectedBackground) {
+        // Validate required data
+        if (!formData.story || !formData.art_style || !formData.characters.length || !formData.background) {
             console.error('Missing required data:', {
-                hasStory: !!userStory,
-                hasStyle: !!selectedStyle,
-                characterCount: selectedCharacterIds.length,
-                hasBackground: !!selectedBackground
+                hasStory: !!formData.story,
+                hasStyle: !!formData.art_style,
+                characterCount: formData.characters.length,
+                hasBackground: !!formData.background
             });
             this.handleGenerationError('Please complete all required steps before generating the comic.');
             return;
         }
 
-        // Get custom character data
-        const characterData = JSON.parse(sessionStorage.getItem('characterData') || '{}');
-
-        // Process characters
-        const characters = selectedCharacterIds.map(id => {
-            const char = characterData[id];
-            if (!char) {
-                console.error('Character not found:', id);
-                return null;
-            }
-            return {
-                id: char.id,
-                name: char.name,
-                description: char.description || char.name,
-                image: char.image,
-                isCustom: char.isCustom,
-                options: {
-                    style: selectedStyle
-                }
-            };
-        }).filter(Boolean);
-
-        // Prepare form data
-        const formData = {
-            characters: characters,
-            story: userStory,
-            art_style: selectedStyle,
-            background: selectedBackground
-        };
-
-        // Generate the comic
-        this.generateComic(formData);
-    },
-
-    findCharacterById(id) {
-        // First check predefined characters
-        const predefined = this.characters.find(c => c.id === id);
-        if (predefined) return predefined;
-
-        // Then check custom characters
-        const customChar = this.customCharacters.find(c => c.id === id);
-        if (customChar) return customChar;
-
-        return null;
-    },
-
-    generateComic(formData) {
-        const apiUrl = this.getApiUrl('api.php');
-        console.log('Sending POST request to:', apiUrl);
+        // Validate character data
+        const invalidCharacters = formData.characters.filter(char =>
+            !char.id || !char.name || !char.image || typeof char.isCustom !== 'boolean'
+        );
+        if (invalidCharacters.length > 0) {
+            console.error('Invalid character data:', invalidCharacters);
+            this.handleGenerationError('Some characters have invalid data. Please try again.');
+            return;
+        }
 
         // Add loading indicator to UI
         $('#debugInfo').html('<p>Sending request to server...</p>');
 
-        // Ensure all parameters are included
-        const requestPayload = {
-            characters: formData.characters,
-            story: formData.story,
-            art_style: formData.art_style,
-            background: formData.background  // Add background to payload
-        };
-
         // Log the exact payload that will be sent
-        console.log('Request payload:', requestPayload);
+        console.log('Request payload:', formData);
 
-        const stringifiedPayload = JSON.stringify(requestPayload);
+        const stringifiedPayload = JSON.stringify(formData);
 
         $.ajax({
             url: apiUrl,
@@ -174,6 +113,24 @@ export const ComicGenerator = {
             success: (response) => {
                 console.log('Comic generation response:', response);
                 $('#debugInfo').html('<pre>Response: ' + JSON.stringify(response, null, 2) + '</pre>');
+
+                // Validate response structure
+                if (!response || typeof response !== 'object') {
+                    this.handleGenerationError('Invalid response from server');
+                    return;
+                }
+
+                if (!response.success) {
+                    this.handleGenerationError(response.message || 'Comic generation failed');
+                    return;
+                }
+
+                // Ensure we have the necessary data for webhook tracking
+                if (!response.result || !response.result.id) {
+                    this.handleGenerationError('Missing panel ID in response');
+                    return;
+                }
+
                 this.handleGenerationSuccess(response);
             },
             error: (xhr, status, error) => {
@@ -210,6 +167,18 @@ export const ComicGenerator = {
                 console.log('Sending request with headers:', xhr.getAllResponseHeaders());
             }
         });
+    },
+
+    findCharacterById(id) {
+        // First check predefined characters
+        const predefined = this.characters.find(c => c.id === id);
+        if (predefined) return predefined;
+
+        // Then check custom characters
+        const customChar = this.customCharacters.find(c => c.id === id);
+        if (customChar) return customChar;
+
+        return null;
     },
 
     checkResult(panelId) {

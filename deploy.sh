@@ -4,7 +4,6 @@
 
 # Configuration
 DEPLOY_DIR="/var/www/comic.amertech.online"
-BACKUP_DIR="/var/www/backups/comic.amertech.online"
 NGINX_CONF="/etc/nginx/sites-available/comic.amertech.online"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 SERVER_USER="serveradmin"
@@ -57,11 +56,6 @@ if [ "$EUID" -ne 0 ]; then
     error "Please run as root"
     exit 1
 fi
-
-# Create backup
-log "Creating backup..."
-mkdir -p "$BACKUP_DIR"
-tar -czf "$BACKUP_DIR/backup_$TIMESTAMP.tar.gz" -C "$DEPLOY_DIR" .
 
 # Verify Nginx configuration
 log "Verifying Nginx configuration..."
@@ -125,7 +119,7 @@ fi
 
 # Check logs for errors
 log "Checking for errors in logs..."
-if grep -i "error" /var/log/nginx/comic.amertech.online.error.log | tail -n 5; then
+if grep -i "error" /var/log/nginx/comic.amertech.online.error.log | tail -n 5 | grep -q "."; then
     warn "Recent errors found in Nginx error log"
 fi
 
