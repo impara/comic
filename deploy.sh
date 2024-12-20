@@ -7,6 +7,8 @@ DEPLOY_DIR="/var/www/comic.amertech.online"
 BACKUP_DIR="/var/www/backups/comic.amertech.online"
 NGINX_CONF="/etc/nginx/sites-available/comic.amertech.online"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+SERVER_USER="serveradmin"
+SERVER_GROUP="serveradmin"
 
 # Colors for output
 RED='\033[0;31m'
@@ -55,9 +57,20 @@ rm -rf "$DEPLOY_DIR/public/temp/*"
 
 # Update file permissions
 log "Updating file permissions..."
-chown -R www-data:www-data "$DEPLOY_DIR"
-find "$DEPLOY_DIR" -type f -exec chmod 644 {} \;
-find "$DEPLOY_DIR" -type d -exec chmod 755 {} \;
+# First, set ownership of .git directory to server user
+chown -R $SERVER_USER:$SERVER_GROUP "$DEPLOY_DIR/.git"
+chmod -R 775 "$DEPLOY_DIR/.git"
+
+# Then set permissions for web files
+find "$DEPLOY_DIR" -path "$DEPLOY_DIR/.git" -prune -o -type f -exec chown www-data:www-data {} \; -exec chmod 644 {} \;
+find "$DEPLOY_DIR" -path "$DEPLOY_DIR/.git" -prune -o -type d -exec chown www-data:www-data {} \; -exec chmod 755 {} \;
+
+# Special handling for directories that need write access
+log "Setting up special permissions..."
+chmod 775 "$DEPLOY_DIR/logs"
+chmod 775 "$DEPLOY_DIR/public/temp"
+chown -R www-data:www-data "$DEPLOY_DIR/logs"
+chown -R www-data:www-data "$DEPLOY_DIR/public/temp"
 
 # Update version in config.js
 log "Updating version in config.js..."
@@ -94,4 +107,10 @@ fi
 log "Checking for errors in logs..."
 if grep -i "error" /var/log/nginx/comic.amertech.online.error.log | tail -n 5; then
     warn "Recent errors found in Nginx error log"
+fi
+
+# Final permission check
+log "Verifying final permissions..."
+if [ ! -w "$DEPLOY_DIR/.git" ]; then
+    warn "Git directory may not be writable by $SERVER_USER"
 fi
