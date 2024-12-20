@@ -6,73 +6,70 @@ require_once __DIR__ . '/../models/Config.php';
 
 class ComicController
 {
-    private LoggerInterface $logger;
-    private ComicGenerator $comicGenerator;
-    private Config $config;
+    private $logger;
+    private $config;
+    private $comicGenerator;
 
-    public function __construct()
+    // Valid styles and backgrounds
+    private const VALID_STYLES = ['manga', 'comic', 'european', 'modern'];
+    private const VALID_BACKGROUNDS = ['simple', 'detailed', 'atmospheric'];
+    private const PANEL_COUNT = 4;
+
+    public function __construct(Logger $logger, Config $config, ComicGenerator $comicGenerator)
     {
-        $this->logger = new Logger();
-        $this->config = Config::getInstance();
-        $this->comicGenerator = new ComicGenerator($this->logger);
+        $this->logger = $logger;
+        $this->config = $config;
+        $this->comicGenerator = $comicGenerator;
     }
 
     /**
-     * Main request handler
+     * Handle incoming API request
      */
     public function handleRequest(): void
     {
-        // Only accept POST requests
-        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-            $this->logger->error('Invalid request method', [
-                'method' => $_SERVER['REQUEST_METHOD']
-            ]);
-            http_response_code(405);
-            echo json_encode([
-                'success' => false,
-                'message' => 'Method not allowed'
-            ]);
-            return;
-        }
+        // Get request body
+        $input = json_decode(file_get_contents('php://input'), true);
 
-        // Get JSON input
-        $rawInput = file_get_contents('php://input');
-        $this->logger->info('Received request', [
-            'raw_input_length' => strlen($rawInput),
-            'content_type' => $_SERVER['CONTENT_TYPE'] ?? 'not set',
-            'raw_input' => $rawInput
-        ]);
-
-        $input = json_decode($rawInput, true);
         if (!$input) {
-            $this->logger->error('Invalid JSON input', [
-                'json_error' => json_last_error_msg(),
-                'content_type' => $_SERVER['CONTENT_TYPE'] ?? 'not set',
-                'request_method' => $_SERVER['REQUEST_METHOD'],
-                'headers' => getallheaders(),
-                'raw_input' => $rawInput
-            ]);
             http_response_code(400);
             echo json_encode([
                 'success' => false,
-                'message' => 'Invalid JSON input: ' . json_last_error_msg()
+                'error' => 'Invalid request body'
             ]);
             return;
         }
 
-        // Handle comic generation
         try {
-            $this->logger->info('Processing comic strip generation request', [
-                'input' => [
-                    'character_count' => count($input['characters'] ?? []),
-                    'story_length' => strlen($input['story'] ?? ''),
-                    'story_value' => $input['story'] ?? null,
-                    'story_type' => gettype($input['story'] ?? null),
-                    'art_style' => $input['art_style'] ?? 'not set',
-                    'raw_input' => $input
-                ]
+            $result = $this->handleGenerateRequest($input);
+            echo json_encode($result);
+        } catch (Exception $e) {
+            $this->logger->error('Request handling failed', [
+                'error' => $e->getMessage()
             ]);
 
+            http_response_code(500);
+            echo json_encode([
+                'success' => false,
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
+
+    /**
+     * Validate and process comic generation request
+     */
+    public function handleGenerateRequest(array $input): array
+    {
+        $this->logger->info('Processing comic strip generation request', [
+            'input' => [
+                'character_count' => count($input['characters'] ?? []),
+                'story_length' => strlen($input['story'] ?? ''),
+                'art_style' => $input['style'] ?? 'not set',
+                'background_style' => $input['background'] ?? 'not set'
+            ]
+        ]);
+
+        try {
             // Validate input
             $this->validateInput($input);
 
@@ -86,154 +83,113 @@ class ComicController
                 $options
             );
 
-            // Return appropriate response based on generation status
-            if ($result['status'] === 'processing') {
-                $this->logger->info('Comic strip generation in processing state', [
-                    'result' => $result
-                ]);
-
-                echo json_encode([
-                    'success' => true,
-                    'message' => 'Comic strip generation started',
-                    'result' => [
-                        'id' => $result['id'],
-                        'status' => 'processing',
-                        'total_panels' => $result['total_panels'],
-                        'pending_panels' => $result['pending_panels']
-                    ]
-                ]);
-            } else {
-                $this->logger->info('Comic strip generation completed', [
-                    'result' => $result
-                ]);
-
-                echo json_encode([
-                    'success' => true,
-                    'message' => 'Comic strip generated successfully',
-                    'result' => [
-                        'id' => $result['id'],
-                        'status' => 'completed',
-                        'total_panels' => $result['total_panels'],
-                        'output_path' => $result['output_path'] ?? null,
-                        'panels' => $result['completed_panels']
-                    ]
-                ]);
-            }
+            return [
+                'success' => true,
+                'data' => $result
+            ];
         } catch (Exception $e) {
-            $this->logger->error('Comic strip generation failed', [
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-                'input' => $input ?? null
+            $this->logger->error('Comic generation failed', [
+                'error' => $e->getMessage()
             ]);
 
-            http_response_code(400);
-            echo json_encode([
+            return [
                 'success' => false,
-                'message' => $this->config->isDebugMode() ? $e->getMessage() : 'Failed to generate comic strip',
-                'error' => $this->config->isDebugMode() ? $e->getTraceAsString() : null
-            ]);
+                'error' => $e->getMessage()
+            ];
         }
     }
 
     /**
-     * Validate comic generation input
-     * @throws RuntimeException if validation fails
+     * Validate all input parameters
      */
     private function validateInput(array $input): void
     {
-        $this->logger->info('Validating input', [
-            'has_characters' => isset($input['characters']),
-            'has_story' => isset($input['story']),
-            'has_style' => isset($input['art_style']),
-            'has_background' => isset($input['background'])
-        ]);
-
         // Validate story
-        if (!isset($input['story']) || empty($input['story'])) {
+        if (empty($input['story'])) {
             throw new RuntimeException('Story is required');
         }
 
-        // Validate characters
-        if (!isset($input['characters']) || !is_array($input['characters'])) {
-            throw new RuntimeException('Characters array is required');
+        if (strlen($input['story']) < 50) {
+            throw new RuntimeException('Story must be at least 50 characters long');
         }
 
+        // Validate style
+        if (empty($input['style']) || !in_array($input['style'], self::VALID_STYLES)) {
+            throw new RuntimeException('Invalid or missing art style. Valid styles are: ' . implode(', ', self::VALID_STYLES));
+        }
+
+        // Validate background
+        if (empty($input['background']) || !in_array($input['background'], self::VALID_BACKGROUNDS)) {
+            throw new RuntimeException('Invalid or missing background style. Valid backgrounds are: ' . implode(', ', self::VALID_BACKGROUNDS));
+        }
+
+        // Validate characters
         if (empty($input['characters'])) {
             throw new RuntimeException('At least one character is required');
         }
 
-        // Validate each character
         foreach ($input['characters'] as $index => $character) {
             $this->validateCharacter($character, $index);
         }
-
-        // Validate style
-        if (!isset($input['art_style']) || empty($input['art_style'])) {
-            throw new RuntimeException('Art style is required');
-        }
-
-        $this->logger->info('Input validation successful');
     }
 
     /**
-     * Validate a single character
-     * @throws RuntimeException if validation fails
+     * Validate individual character data
      */
     private function validateCharacter(array $character, int $index): void
     {
-        $this->logger->info('Validating character', [
-            'index' => $index,
-            'has_description' => isset($character['description']),
-            'has_image' => isset($character['image']),
-            'has_id' => isset($character['id'])
-        ]);
-
-        // Validate character ID
-        if (!isset($character['id'])) {
+        if (empty($character['id'])) {
             throw new RuntimeException("Character at index $index must have an ID");
         }
 
-        // Validate character description or image
-        if (!isset($character['description']) && !isset($character['image'])) {
-            throw new RuntimeException("Character at index $index must have either description or image");
+        if (empty($character['name'])) {
+            throw new RuntimeException("Character at index $index must have a name");
         }
 
-        // Validate image format if provided
-        if (isset($character['image'])) {
-            if (
-                !preg_match('/^data:image\/(\w+);base64,/', $character['image'])
-                && !filter_var($character['image'], FILTER_VALIDATE_URL)
-                && strpos($character['image'], '/public/generated/') === false
-            ) {
-                throw new RuntimeException("Character image at index $index must be base64 encoded, a valid URL, or a generated image path");
-            }
+        if (empty($character['image'])) {
+            throw new RuntimeException("Character at index $index must have an image");
+        }
+
+        // Validate image format
+        if (
+            !preg_match('/^data:image\/(\w+);base64,/', $character['image'])
+            && !filter_var($character['image'], FILTER_VALIDATE_URL)
+            && strpos($character['image'], '/public/generated/') === false
+        ) {
+            throw new RuntimeException("Character image at index $index must be base64 encoded, a valid URL, or a generated image path");
         }
     }
 
     /**
      * Prepare generation options from input
-     * @param array $input Request input
-     * @return array Generation options
      */
     private function prepareGenerationOptions(array $input): array
     {
-        $options = [
+        return [
+            'panel_count' => self::PANEL_COUNT,
             'style' => [
-                'art_style' => $input['art_style'],
-                'background' => $input['background']
+                'name' => $input['style'],
+                'background' => $input['background'],
+                'line_weight' => $input['style_params']['line_weight'] ?? 'medium',
+                'shading' => $input['style_params']['shading'] ?? 'cel',
+                'color_palette' => $input['style_params']['color_palette'] ?? 'vibrant',
+                'consistency_params' => [
+                    'character_scale' => 1.0,
+                    'background_detail' => $input['background'] === 'detailed' ? 'high' : 'medium',
+                    'lighting_scheme' => 'neutral'
+                ]
+            ],
+            'panel_settings' => [
+                'width' => 800,
+                'height' => 600,
+                'margin' => 50,
+                'spacing' => 20
+            ],
+            'generation_params' => [
+                'quality' => 'high',
+                'style_strength' => 0.8,
+                'background_strength' => 0.7
             ]
         ];
-
-        // Add any additional style parameters
-        if (isset($input['style_params'])) {
-            $options['style_params'] = $input['style_params'];
-        }
-
-        // Add panel-specific options if provided
-        if (isset($input['panel_options'])) {
-            $options['panel_options'] = $input['panel_options'];
-        }
-
-        return $options;
     }
 }

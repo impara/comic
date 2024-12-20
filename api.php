@@ -1,10 +1,38 @@
 <?php
 
 require_once __DIR__ . '/bootstrap.php';
+require_once __DIR__ . '/models/Logger.php';
+require_once __DIR__ . '/models/Config.php';
+require_once __DIR__ . '/models/ImageComposer.php';
+require_once __DIR__ . '/models/CharacterProcessor.php';
+require_once __DIR__ . '/models/StoryParser.php';
+require_once __DIR__ . '/models/StateManager.php';
+require_once __DIR__ . '/models/ComicGenerator.php';
+require_once __DIR__ . '/controllers/ComicController.php';
 
 try {
     // Initialize configuration
     $config = Config::getInstance();
+    $logger = new Logger();
+
+    // Initialize dependencies for ComicController
+    $imageComposer = new ImageComposer($logger, $config);
+    $characterProcessor = new CharacterProcessor($logger, $config);
+    $storyParser = new StoryParser($logger);
+    $stateManager = new StateManager($config->getTempPath(), $logger);
+
+    // Initialize ComicGenerator with its dependencies
+    $comicGenerator = new ComicGenerator(
+        $stateManager,
+        $logger,
+        $config,
+        $imageComposer,
+        $characterProcessor,
+        $storyParser
+    );
+
+    // Initialize controller with dependencies
+    $controller = new ComicController($logger, $config, $comicGenerator);
 
     // Enable CORS for development
     header('Access-Control-Allow-Origin: *');
@@ -28,8 +56,7 @@ try {
         }
     }
 
-    // Initialize and handle the request
-    $controller = new ComicController();
+    // Handle the request
     $controller->handleRequest();
 } catch (Throwable $e) {
     error_log(sprintf(

@@ -24,12 +24,91 @@ class CharacterProcessor
     }
 
     /**
-     * Convert a custom uploaded character image to cartoon style
-     * @param string $imageData Base64 encoded image or URL
-     * @param array $options Additional options like art style
-     * @return array Generated image data
+     * Process multiple characters in a batch for a single panel
+     * @param array $characters Array of character data
+     * @param array $options Panel-specific options
+     * @return array Array of processed character data
      */
-    public function cartoonifyCharacter(string $imageData, array $options = []): array
+    public function processCharacters(array $characters, array $options = []): array
+    {
+        $this->logger->info("Processing characters for panel", [
+            'character_count' => count($characters),
+            'options' => $options
+        ]);
+
+        try {
+            // Validate input
+            if (empty($characters)) {
+                throw new Exception("At least one character is required");
+            }
+
+            // Process all characters in a batch
+            $results = [];
+            foreach ($characters as $character) {
+                try {
+                    if (!isset($character['image'])) {
+                        throw new Exception("Character image is required");
+                    }
+
+                    if (!isset($character['id'])) {
+                        throw new Exception("Character ID is required");
+                    }
+
+                    // Skip processing if already a Replicate URL
+                    if (strpos($character['image'], 'replicate.delivery') !== false) {
+                        $results[$character['id']] = [
+                            'id' => $character['id'],
+                            'output' => $character['image'],
+                            'status' => 'succeeded',
+                            'character_id' => $character['id']
+                        ];
+                        continue;
+                    }
+
+                    // Prepare character-specific options
+                    $charOptions = array_merge(
+                        $options,
+                        $character['options'] ?? [],
+                        [
+                            'character_id' => $character['id'],
+                            'panel_index' => $options['panel_index'] ?? 0
+                        ]
+                    );
+
+                    // Process the character image
+                    $result = $this->cartoonifyCharacter($character['image'], $charOptions);
+                    $result['character_id'] = $character['id'];
+                    $results[$character['id']] = $result;
+                } catch (Exception $e) {
+                    $this->logger->error("Character processing failed", [
+                        'character_id' => $character['id'],
+                        'error' => $e->getMessage()
+                    ]);
+                    $results[$character['id']] = [
+                        'id' => $character['id'],
+                        'status' => 'failed',
+                        'error' => $e->getMessage()
+                    ];
+                }
+            }
+
+            return $results;
+        } catch (Exception $e) {
+            $this->logger->error("Batch character processing failed", [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            throw $e;
+        }
+    }
+
+    /**
+     * Convert a character image to cartoon style
+     * @param string $imageData Image data (URL, base64, or file path)
+     * @param array $options Processing options
+     * @return array Processing result
+     */
+    private function cartoonifyCharacter(string $imageData, array $options = []): array
     {
         $this->logger->info("Cartoonifying character", [
             'image_length' => strlen($imageData),
@@ -50,7 +129,8 @@ class CharacterProcessor
             $result = $this->replicateClient->cartoonify($imageData, $options);
 
             $this->logger->info("Character cartoonified successfully", [
-                'result' => $result
+                'result' => $result,
+                'character_id' => $options['character_id'] ?? null
             ]);
 
             return $result;
@@ -58,72 +138,6 @@ class CharacterProcessor
             $this->logger->error("Failed to cartoonify character", [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString()
-            ]);
-            throw $e;
-        }
-    }
-
-    /**
-     * Process a character based on its type
-     * @param array $character Character data
-     * @return array Generated image data
-     */
-    public function processCharacter(array $character): array
-    {
-        $this->logger->info("Processing character", ['character' => $character]);
-
-        try {
-            if (!isset($character['image'])) {
-                throw new Exception("Character image is required");
-            }
-
-            if (!isset($character['id'])) {
-                throw new Exception("Character ID is required");
-            }
-
-            // Skip cartoonification if the image is already a Replicate URL
-            if (strpos($character['image'], 'replicate.delivery') !== false) {
-                return [
-                    'id' => $character['id'],
-                    'output' => $character['image'],
-                    'status' => 'succeeded',
-                    'character_id' => $character['id']
-                ];
-            }
-
-            // Start cartoonification
-            $result = $this->cartoonifyCharacter($character['image'], $character['options'] ?? []);
-
-            $this->logger->error("TEST_LOG - Cartoonification API call result", [
-                'character_id' => $character['id'],
-                'prediction_id' => $result['id'],
-                'status' => $result['status'] ?? 'unknown',
-                'has_output' => isset($result['output'])
-            ]);
-
-            // Check for error status
-            if (isset($result['status']) && $result['status'] === 'failed') {
-                throw new Exception($result['error'] ?? 'Cartoonification failed without specific error');
-            }
-
-            // Add character ID to the result for tracking
-            $result['character_id'] = $character['id'];
-
-            // Ensure required fields are present
-            if (!isset($result['id'])) {
-                throw new Exception("Missing prediction ID in cartoonification result");
-            }
-
-            if (isset($result['output']) && !filter_var($result['output'], FILTER_VALIDATE_URL)) {
-                throw new Exception("Invalid output URL in cartoonification result");
-            }
-
-            return $result;
-        } catch (Exception $e) {
-            $this->logger->error("Character processing failed", [
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-                'character_id' => $character['id']
             ]);
             throw $e;
         }

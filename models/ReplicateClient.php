@@ -89,14 +89,6 @@ class ReplicateClient
                     // Get the base URL using the dedicated method
                     $baseUrl = $this->config->getBaseUrl();
                     $image = rtrim($baseUrl, '/') . '/public/' . $publicPath;
-
-                    // Add debug logging
-                    $this->logger->info("Constructed image URL", [
-                        'original_path' => $matches[0],
-                        'public_path' => $publicPath,
-                        'base_url' => $baseUrl,
-                        'final_url' => $image
-                    ]);
                 }
             }
 
@@ -106,19 +98,6 @@ class ReplicateClient
 
             // Get the webhook URL from config
             $webhookUrl = $this->config->getBaseUrl() . '/webhook.php';
-
-            // Log webhook configuration
-            $this->logger->info("Webhook configuration", [
-                'base_url' => $this->config->getBaseUrl(),
-                'webhook_url' => $webhookUrl,
-                'webhook_secret' => !empty($this->config->get('replicate.webhook_secret')),
-                'server_info' => [
-                    'http_host' => $_SERVER['HTTP_HOST'] ?? 'not set',
-                    'request_uri' => $_SERVER['REQUEST_URI'] ?? 'not set',
-                    'https' => isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on',
-                    'server_port' => $_SERVER['SERVER_PORT'] ?? 'not set'
-                ]
-            ]);
 
             $result = $this->httpClient->post('https://api.replicate.com/v1/predictions', [
                 'version' => $this->config->get('replicate.models.cartoonify.version'),
@@ -140,13 +119,6 @@ class ReplicateClient
                     'panel_id' => $originalPanelId
                 ];
                 file_put_contents($pendingFile, json_encode($pendingData));
-
-                // Log pending file creation
-                $this->logger->info("Created pending file for cartoonification", [
-                    'prediction_id' => $result['id'],
-                    'original_panel_id' => $originalPanelId,
-                    'pending_file' => basename($pendingFile)
-                ]);
             }
 
             return $result;

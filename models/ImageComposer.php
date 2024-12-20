@@ -602,21 +602,6 @@ class ImageComposer
     }
 
     /**
-     * Update the strip state file
-     * @param string $stripId Strip ID
-     * @param array $update Update data
-     */
-    private function updateStripState(string $stripId, array $update): void
-    {
-        $stateFile = $this->config->getTempPath() . "strip_state_{$stripId}.json";
-        if (file_exists($stateFile)) {
-            $state = json_decode(file_get_contents($stateFile), true);
-            $state = array_merge($state, $update, ['updated_at' => time()]);
-            file_put_contents($stateFile, json_encode($state));
-        }
-    }
-
-    /**
      * Load an image from a file path
      * @param string $path Image file path
      * @return \GdImage|false GD image resource or false on failure
@@ -634,5 +619,460 @@ class ImageComposer
             default:
                 return false;
         }
+    }
+
+    /**
+     * Compose a panel image with consistent styling
+     * @param array $panelComposition Array of character data with positions
+     * @param string $sceneDescription Description of the scene
+     * @param array $options Panel options including style parameters
+     * @return string Path to the composed panel image
+     * @throws Exception on failure
+     */
+    public function composePanelImage(array $panelComposition, string $sceneDescription, array $options = []): string
+    {
+        $this->logger->info("Starting panel composition", [
+            'character_count' => count($panelComposition),
+            'scene_length' => strlen($sceneDescription),
+            'style_options' => $options['style'] ?? []
+        ]);
+
+        try {
+            // Get panel dimensions from options or use defaults
+            $width = $options['style']['width'] ?? 1024;
+            $height = $options['style']['height'] ?? 1024;
+
+            // Create panel canvas
+            $panel = imagecreatetruecolor($width, $height);
+            imagealphablending($panel, true);
+            imagesavealpha($panel, true);
+
+            // Fill with background color based on mood
+            $bgColor = $this->getBackgroundColor($panel, $options['style']['consistency_anchors']['panel_mood'] ?? 'neutral');
+            imagefill($panel, 0, 0, $bgColor);
+
+            // Sort characters by z-index for proper layering
+            uasort($panelComposition, function ($a, $b) {
+                return ($a['position']['z_index'] ?? 1) <=> ($b['position']['z_index'] ?? 1);
+            });
+
+            // Process each character
+            foreach ($panelComposition as $charId => $charData) {
+                if (!isset($charData['image'])) {
+                    throw new Exception("Character $charId is missing image data");
+                }
+
+                // Load character image
+                $characterImage = $this->loadImageFromUrl($charData['image']);
+                if (!$characterImage) {
+                    throw new Exception("Failed to load image for character $charId");
+                }
+
+                // Apply style adjustments
+                $characterImage = $this->applyStyleAdjustments(
+                    $characterImage,
+                    $options['style'] ?? [],
+                    $charData['position']['scale'] ?? 1.0
+                );
+
+                // Get character dimensions
+                $srcWidth = imagesx($characterImage);
+                $srcHeight = imagesy($characterImage);
+
+                // Calculate position
+                $position = $charData['position'];
+                $x = $position['x'] - ($srcWidth / 2);  // Center horizontally
+                $y = $position['y'] - ($srcHeight / 2); // Center vertically
+
+                // Add character to panel
+                imagecopy(
+                    $panel,
+                    $characterImage,
+                    $x,
+                    $y,
+                    0,
+                    0,
+                    $srcWidth,
+                    $srcHeight
+                );
+
+                imagedestroy($characterImage);
+            }
+
+            // Apply panel-wide style effects
+            $this->applyPanelEffects($panel, $options['style'] ?? []);
+
+            // Save the composed panel
+            $outputPath = $this->config->getTempPath() . 'composed_panel_' . uniqid() . '.png';
+            imagepng($panel, $outputPath);
+            imagedestroy($panel);
+
+            return $outputPath;
+        } catch (Exception $e) {
+            $this->logger->error("Panel composition failed", [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            throw $e;
+        }
+    }
+
+    /**
+     * Get background color based on panel mood
+     * @param \GdImage $image GD image resource
+     * @param string $mood Panel mood
+     * @return int Color identifier
+     */
+    private function getBackgroundColor(\GdImage $image, string $mood): int
+    {
+        $colors = [
+            'establishing' => [245, 245, 245], // Light gray for establishing shots
+            'developing' => [240, 245, 250],   // Light blue tint for development
+            'transitional' => [245, 240, 245], // Light purple tint for transitions
+            'climactic' => [250, 240, 240],    // Light red tint for climactic moments
+            'resolving' => [240, 250, 240],    // Light green tint for resolution
+            'neutral' => [255, 255, 255]       // White for neutral scenes
+        ];
+
+        $rgb = $colors[$mood] ?? $colors['neutral'];
+        return imagecolorallocate($image, $rgb[0], $rgb[1], $rgb[2]);
+    }
+
+    /**
+     * Apply style adjustments to a character image
+     * @param \GdImage $image Character image resource
+     * @param array $style Style options
+     * @param float $scale Character scale factor
+     * @return \GdImage Processed image
+     */
+    private function applyStyleAdjustments(\GdImage $image, array $style, float $scale): \GdImage
+    {
+        $width = imagesx($image);
+        $height = imagesy($image);
+
+        // Apply scaling
+        $newWidth = (int)($width * $scale);
+        $newHeight = (int)($height * $scale);
+        $scaled = imagecreatetruecolor($newWidth, $newHeight);
+        imagealphablending($scaled, true);
+        imagesavealpha($scaled, true);
+        imagecopyresampled($scaled, $image, 0, 0, 0, 0, $newWidth, $newHeight, $width, $height);
+        imagedestroy($image);
+
+        // Apply color adjustments based on style
+        $this->adjustImageColors($scaled, $style);
+
+        return $scaled;
+    }
+
+    /**
+     * Apply panel-wide effects for style consistency
+     * @param \GdImage $panel Panel image resource
+     * @param array $style Style options
+     */
+    private function applyPanelEffects(\GdImage $panel, array $style): void
+    {
+        // Apply lighting based on mood and scheme
+        $lightingScheme = $style['consistency_anchors']['lighting_scheme'] ?? 'neutral';
+        $this->applyLighting($panel, $lightingScheme);
+
+        // Apply art style effects
+        $artStyle = $style['art_style'] ?? [];
+        $this->applyArtStyle($panel, $artStyle);
+    }
+
+    /**
+     * Apply lighting effects to the panel
+     * @param \GdImage $panel Panel image resource
+     * @param string $scheme Lighting scheme
+     */
+    private function applyLighting(\GdImage $panel, string $scheme): void
+    {
+        $width = imagesx($panel);
+        $height = imagesy($panel);
+
+        switch ($scheme) {
+            case 'dramatic':
+                // Add vignette effect
+                $this->addVignette($panel, 0.3);
+                break;
+            case 'bright':
+                // Increase brightness
+                imagefilter($panel, IMG_FILTER_BRIGHTNESS, 10);
+                break;
+            case 'dim':
+                // Decrease brightness
+                imagefilter($panel, IMG_FILTER_BRIGHTNESS, -10);
+                break;
+            case 'warm':
+                // Add warm color overlay
+                imagefilter($panel, IMG_FILTER_COLORIZE, 10, 5, 0);
+                break;
+            case 'cool':
+                // Add cool color overlay
+                imagefilter($panel, IMG_FILTER_COLORIZE, 0, 5, 10);
+                break;
+        }
+    }
+
+    /**
+     * Apply art style effects to the panel
+     * @param \GdImage $panel Panel image resource
+     * @param array $style Art style parameters
+     */
+    private function applyArtStyle(\GdImage $panel, array $style): void
+    {
+        // Apply line weight effect
+        $lineWeight = $style['line_weight'] ?? 'medium';
+        switch ($lineWeight) {
+            case 'bold':
+                imagefilter($panel, IMG_FILTER_EDGEDETECT);
+                break;
+            case 'light':
+                imagefilter($panel, IMG_FILTER_SMOOTH, 5);
+                break;
+        }
+
+        // Apply color palette adjustments
+        $colorPalette = $style['color_palette'] ?? 'vibrant';
+        switch ($colorPalette) {
+            case 'vibrant':
+                imagefilter($panel, IMG_FILTER_CONTRAST, -10);
+                imagefilter($panel, IMG_FILTER_BRIGHTNESS, 5);
+                break;
+            case 'muted':
+                imagefilter($panel, IMG_FILTER_CONTRAST, -20);
+                imagefilter($panel, IMG_FILTER_GRAYSCALE);
+                imagefilter($panel, IMG_FILTER_COLORIZE, 10, 10, 10);
+                break;
+            case 'noir':
+                imagefilter($panel, IMG_FILTER_GRAYSCALE);
+                imagefilter($panel, IMG_FILTER_CONTRAST, 10);
+                break;
+        }
+    }
+
+    /**
+     * Add vignette effect to panel
+     * @param \GdImage $panel Panel image resource
+     * @param float $intensity Effect intensity (0-1)
+     */
+    private function addVignette(\GdImage $panel, float $intensity): void
+    {
+        $width = imagesx($panel);
+        $height = imagesy($panel);
+        $centerX = $width / 2;
+        $centerY = $height / 2;
+        $maxDistance = sqrt($centerX * $centerX + $centerY * $centerY);
+
+        // Create vignette overlay
+        $vignette = imagecreatetruecolor($width, $height);
+        imagealphablending($vignette, true);
+        imagesavealpha($vignette, true);
+
+        // Fill vignette with gradient
+        for ($y = 0; $y < $height; $y++) {
+            for ($x = 0; $x < $width; $x++) {
+                $distance = sqrt(pow($x - $centerX, 2) + pow($y - $centerY, 2));
+                $alpha = min(127, (int)(($distance / $maxDistance) * 127 * $intensity));
+                $color = imagecolorallocatealpha($vignette, 0, 0, 0, 127 - $alpha);
+                imagesetpixel($vignette, $x, $y, $color);
+            }
+        }
+
+        // Apply vignette to panel
+        imagecopy($panel, $vignette, 0, 0, 0, 0, $width, $height);
+        imagedestroy($vignette);
+    }
+
+    /**
+     * Adjust image colors based on style settings
+     * @param \GdImage $image Image resource
+     * @param array $style Style options
+     */
+    private function adjustImageColors(\GdImage $image, array $style): void
+    {
+        $artStyle = $style['art_style'] ?? [];
+        $colorPalette = $artStyle['color_palette'] ?? 'vibrant';
+
+        switch ($colorPalette) {
+            case 'vibrant':
+                imagefilter($image, IMG_FILTER_CONTRAST, -10);
+                imagefilter($image, IMG_FILTER_BRIGHTNESS, 5);
+                break;
+            case 'muted':
+                imagefilter($image, IMG_FILTER_CONTRAST, -20);
+                imagefilter($image, IMG_FILTER_GRAYSCALE);
+                imagefilter($image, IMG_FILTER_COLORIZE, 10, 10, 10);
+                break;
+            case 'noir':
+                imagefilter($image, IMG_FILTER_GRAYSCALE);
+                imagefilter($image, IMG_FILTER_CONTRAST, 10);
+                break;
+        }
+    }
+
+    /**
+     * Centralized state management for panel composition
+     * @param string $panelId Panel ID
+     * @param array $update State update data
+     * @return array Updated state
+     */
+    private function updatePanelState(string $panelId, array $update): array
+    {
+        $stateFile = $this->config->getTempPath() . "state_{$panelId}.json";
+        $state = [];
+
+        if (file_exists($stateFile)) {
+            $state = json_decode(file_get_contents($stateFile), true) ?? [];
+        }
+
+        // Merge updates with existing state
+        $state = array_merge($state, $update, [
+            'updated_at' => time()
+        ]);
+
+        // Ensure required fields
+        $state['id'] = $state['id'] ?? $panelId;
+        $state['status'] = $state['status'] ?? 'initializing';
+
+        // Write state to file
+        file_put_contents($stateFile, json_encode($state));
+
+        $this->logger->info("Panel state updated", [
+            'panel_id' => $panelId,
+            'status' => $state['status'],
+            'update' => $update
+        ]);
+
+        return $state;
+    }
+
+    /**
+     * Centralized state management for strip composition
+     * @param string $stripId Strip ID
+     * @param array $update State update data
+     * @return array Updated state
+     */
+    private function updateStripState(string $stripId, array $update): array
+    {
+        $stateFile = $this->config->getTempPath() . "strip_state_{$stripId}.json";
+        $state = [];
+
+        if (file_exists($stateFile)) {
+            $state = json_decode(file_get_contents($stateFile), true) ?? [];
+        }
+
+        // Merge updates with existing state
+        $state = array_merge($state, $update, [
+            'updated_at' => time()
+        ]);
+
+        // Ensure required fields
+        $state['id'] = $state['id'] ?? $stripId;
+        $state['status'] = $state['status'] ?? 'initializing';
+        $state['panels'] = $state['panels'] ?? [];
+
+        // Write state to file
+        file_put_contents($stateFile, json_encode($state));
+
+        $this->logger->info("Strip state updated", [
+            'strip_id' => $stripId,
+            'status' => $state['status'],
+            'update' => $update
+        ]);
+
+        return $state;
+    }
+
+    /**
+     * Handle composition error and update state
+     * @param string $id Panel or strip ID
+     * @param string $type 'panel' or 'strip'
+     * @param string $error Error message
+     * @param Exception|null $exception Optional exception for logging
+     */
+    private function handleCompositionError(string $id, string $type, string $error, ?Exception $exception = null): void
+    {
+        $update = [
+            'status' => 'failed',
+            'error' => $error,
+            'failed_at' => time()
+        ];
+
+        if ($type === 'panel') {
+            $this->updatePanelState($id, $update);
+        } else {
+            $this->updateStripState($id, $update);
+        }
+
+        if ($exception) {
+            $this->logger->error("Composition failed", [
+                'type' => $type,
+                'id' => $id,
+                'error' => $error,
+                'trace' => $exception->getTraceAsString()
+            ]);
+        }
+    }
+
+    /**
+     * Initialize panel composition state
+     * @param string $panelId Panel ID
+     * @param array $options Panel options
+     * @return array Initial state
+     */
+    private function initializePanelState(string $panelId, array $options = []): array
+    {
+        return $this->updatePanelState($panelId, [
+            'id' => $panelId,
+            'strip_id' => $options['strip_id'] ?? null,
+            'panel_index' => $options['panel_index'] ?? null,
+            'status' => 'initializing',
+            'started_at' => time(),
+            'style_options' => $options['style'] ?? []
+        ]);
+    }
+
+    /**
+     * Initialize strip composition state
+     * @param string $stripId Strip ID
+     * @param array $options Strip options
+     * @return array Initial state
+     */
+    private function initializeStripState(string $stripId, array $options = []): array
+    {
+        return $this->updateStripState($stripId, [
+            'id' => $stripId,
+            'status' => 'initializing',
+            'started_at' => time(),
+            'panels' => [],
+            'options' => $options,
+            'progress' => 0
+        ]);
+    }
+
+    /**
+     * Update strip progress based on panel states
+     * @param string $stripId Strip ID
+     * @param array $state Current strip state
+     */
+    private function updateStripProgress(string $stripId, array $state): void
+    {
+        if (empty($state['panels'])) {
+            return;
+        }
+
+        $completedCount = count(array_filter($state['panels'], function ($panel) {
+            return $panel['status'] === 'completed';
+        }));
+
+        $progress = ($completedCount / count($state['panels'])) * 100;
+
+        $this->updateStripState($stripId, [
+            'progress' => round($progress, 2),
+            'completed_count' => $completedCount,
+            'total_count' => count($state['panels'])
+        ]);
     }
 }

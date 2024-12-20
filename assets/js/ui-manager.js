@@ -56,52 +56,51 @@ export const UIManager = {
     },
 
     showGeneratingState() {
-        $('.progress-bar').css('width', '100%');
         $('#step3').removeClass('active');
         $('#step4').addClass('active');
         $('#generatingStatus').show();
         $('#completionStatus').hide();
-
-        // Wait for DOM updates to complete before scrolling
-        setTimeout(() => {
-            const $wizardContainer = $('.wizard-container');
-            const scrollTarget = $wizardContainer.length ?
-                $wizardContainer.offset().top - 50 :
-                0;
-
-            $('html, body').animate({
-                scrollTop: scrollTarget
-            }, {
-                duration: 500,
-                easing: 'swing',
-                complete: () => {
-                    // Force a second scroll in case of any race conditions
-                    window.scrollTo({
-                        top: scrollTarget,
-                        behavior: 'smooth'
-                    });
-                }
-            });
-        }, 100);
+        $('.progress-bar').css('width', '0%');
     },
 
-    hideGeneratingState(callback) {
-        $('#generatingStatus').fadeOut(400, () => {
-            if (typeof callback === 'function') {
-                callback();
-            }
-        });
+    showError(message) {
+        $('#debugInfo').html(`<p class="text-danger">Error: ${message}</p>`);
+        $('#generatingStatus').hide();
+        $('#generateButton').prop('disabled', false).show();
+        $('.progress-bar').css('width', '0%');
+    },
+
+    updateProgress(progress) {
+        $('.progress-bar').css('width', `${progress}%`);
+    },
+
+    updateDebugInfo(info) {
+        $('#debugInfo').html(`
+            <p>Generating comic strip...</p>
+            <p>Strip ID: ${info.stripId}</p>
+            <p>Progress: ${info.completedPanels}/${info.totalPanels} panels completed</p>
+            <p>Status: ${info.status}</p>
+        `);
     },
 
     showCompletionState() {
-        try {
-            // Show completion state with animation
-            $('#completionStatus').fadeIn(400);
-        } catch (e) {
-            console.error('Error in showCompletionState:', e);
-            // Fallback to direct show without animation
-            $('#completionStatus').show();
-        }
+        $('#generatingStatus').hide();
+        $('#completionStatus').show();
+    },
+
+    displayResult(imagePath) {
+        $('.comic-preview').html(`
+            <img src="${imagePath}" class="img-fluid mb-4" alt="Generated Comic">
+        `);
+    },
+
+    reset() {
+        $('#debugInfo').empty();
+        $('#generatingStatus').hide();
+        $('#completionStatus').hide();
+        $('.progress-bar').css('width', '0%');
+        $('.comic-preview').empty();
+        $('#generateButton').prop('disabled', false).show();
     },
 
     showGenerateButton() {
