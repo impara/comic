@@ -47,26 +47,26 @@ const FormHandler = {
             sessionStorage.setItem('userStory', story);
         });
 
-        // Example prompts
-        $(document).on('click', '.example-prompt', this.handleExamplePrompt);
+        // Example prompts - use arrow function to preserve this context
+        $(document).on('click', '.example-prompt', (e) => this.handleExamplePrompt(e));
 
         // Style selection
-        $(document).on('click', '.style-option', this.handleStyleSelection);
+        $(document).on('click', '.style-option', (e) => this.handleStyleSelection(e));
 
         // Background selection
-        $(document).on('click', '.background-option', this.handleBackgroundSelection);
+        $(document).on('click', '.background-option', (e) => this.handleBackgroundSelection(e));
 
         // Character selection
-        $(document).on('click', '.character-option', this.handleCharacterSelection);
+        $(document).on('click', '.character-option', (e) => this.handleCharacterSelection(e));
 
         // Character upload
-        $('#uploadCharacter').on('click', this.handleCharacterUpload);
-        $('#characterImage').on('change', this.handleCharacterImagePreview);
-        $('#characterName').on('input', this.handleCharacterNameInput);
+        $('#uploadCharacter').on('click', (e) => this.handleCharacterUpload(e));
+        $('#characterImage').on('change', (e) => this.handleCharacterImagePreview(e));
+        $('#characterName').on('input', (e) => this.handleCharacterNameInput(e));
 
         // Navigation buttons
-        $('#next-step-1').on('click', this.handleNextStep1);
-        $('#next-step-2').on('click', this.handleNextStep2);
+        $('#next-step-1').on('click', (e) => this.handleNextStep1(e));
+        $('#next-step-2').on('click', (e) => this.handleNextStep2(e));
         $('#back-step-2').on('click', () => this.handleBackStep(1));
         $('#back-step-3').on('click', () => this.handleBackStep(2));
 
