@@ -1,5 +1,5 @@
 // Story examples for the comic generator
-export const storyExamples = [
+const storyExamples = [
     {
         title: "Superhero Adventure",
         text: "A young hero discovers their powers while trying to save their city from an unexpected threat. With the help of a wise mentor, they must learn to control their abilities and protect those they love."
@@ -17,3 +17,7 @@ export const storyExamples = [
         text: "A lonely pet discovers a secret gathering of neighborhood animals who meet at night to share stories and help each other. They welcome their new friend and embark on exciting adventures together."
     }
 ];
+
+// Export as both default and named export for compatibility
+export default storyExamples;
+export { storyExamples };

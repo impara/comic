@@ -119,6 +119,12 @@ class App {
         const examplePromptsList = document.getElementById('examplePromptsList');
         if (!examplePromptsList) return;
 
+        // Check if storyExamples is an array
+        if (!Array.isArray(storyExamples)) {
+            console.error('storyExamples is not an array:', storyExamples);
+            return;
+        }
+
         storyExamples.forEach(example => {
             const li = document.createElement('li');
             li.className = 'mb-3';
