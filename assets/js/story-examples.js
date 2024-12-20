@@ -18,6 +18,5 @@ const examples = [
     }
 ];
 
-// Export both default and named for compatibility
+// Only use named export for consistency
 export { examples as storyExamples };
-export default examples;

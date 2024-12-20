@@ -1,3 +1,26 @@
+// Module error handling
+window.addEventListener('error', (event) => {
+    if (event.error instanceof TypeError && event.error.message.includes('does not provide an export')) {
+        console.error('Module loading error:', {
+            file: event.filename,
+            line: event.lineno,
+            message: event.error.message,
+            stack: event.error.stack
+        });
+
+        // Show user-friendly error
+        const errorContainer = document.getElementById('error-container');
+        if (errorContainer) {
+            errorContainer.innerHTML = `
+                <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                    <strong>Loading Error:</strong> Failed to load required modules. Please try clearing your browser cache and refreshing the page.
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                </div>
+            `;
+        }
+    }
+});
+
 import { CONFIG } from './config.js';
 import { storyExamples } from './story-examples.js';
 import { UIManager } from './ui-manager.js';
