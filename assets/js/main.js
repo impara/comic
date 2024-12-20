@@ -21,12 +21,26 @@ window.addEventListener('error', (event) => {
     }
 });
 
+// Import CONFIG first since we need it for versioned paths
 import { CONFIG } from './config.js';
-import { storyExamples } from './story-examples.js';
-import { UIManager } from './ui-manager.js';
-import { FormHandler } from './form-handler.js';
-import { ComicGenerator } from './comic-generator.js';
-import { SharingManager } from './sharing.js';
+
+// Then import other modules using versioned paths
+const moduleImports = await Promise.all([
+    import(CONFIG.getVersionedPath('./story-examples.js')),
+    import(CONFIG.getVersionedPath('./ui-manager.js')),
+    import(CONFIG.getVersionedPath('./form-handler.js')),
+    import(CONFIG.getVersionedPath('./comic-generator.js')),
+    import(CONFIG.getVersionedPath('./sharing.js'))
+]);
+
+// Destructure the imports
+const [
+    { storyExamples },
+    { UIManager },
+    { FormHandler },
+    { ComicGenerator },
+    { SharingManager }
+] = moduleImports;
 
 // Add version info to loaded modules
 const loadedModules = {

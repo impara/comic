@@ -470,16 +470,29 @@
     <script>
         // Generate a unique timestamp for this page load
         window.__BUILD_TIME = new Date().getTime();
+        window.__APP_VERSION = '1.0.2';
     </script>
-    <script type="module" src="assets/js/config.js?v=1.0.2&t=BUILD_TIME"></script>
-    <script type="module" src="assets/js/main.js?v=1.0.2&t=BUILD_TIME"></script>
-    <script>
-        // Replace BUILD_TIME placeholder with actual timestamp
-        document.querySelectorAll('script[type="module"]').forEach(script => {
-            if (script.src.includes('BUILD_TIME')) {
-                script.src = script.src.replace('BUILD_TIME', window.__BUILD_TIME);
+    <script type="module">
+        // Dynamic imports with version and timestamp
+        async function initializeApp() {
+            try {
+                // Import config first
+                const { CONFIG } = await import(`./assets/js/config.js?v=${window.__APP_VERSION}&t=${window.__BUILD_TIME}`);
+
+                // Then import main
+                await import(`./assets/js/main.js?v=${window.__APP_VERSION}&t=${window.__BUILD_TIME}`);
+            } catch (error) {
+                console.error('Error loading modules:', error);
+                document.getElementById('error-container').innerHTML = `
+                    <div class="alert alert-danger">
+                        Failed to load application modules. Please refresh the page or contact support.
+                    </div>
+                `;
             }
-        });
+        }
+
+        // Start initialization
+        initializeApp();
     </script>
 
     <!-- Fallback for Browsers Not Supporting ES Modules -->
