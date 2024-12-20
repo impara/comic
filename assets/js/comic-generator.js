@@ -7,6 +7,14 @@ export const ComicGenerator = {
         this.pollingInterval = null;
         this.cartoonificationState = new Map();
         this.originalPanelId = null;  // Add this for better tracking
+
+        // Bind all methods to this instance
+        Object.getOwnPropertyNames(Object.getPrototypeOf(this))
+            .filter(method => typeof this[method] === 'function')
+            .forEach(method => {
+                this[method] = this[method].bind(this);
+            });
+
         console.log('ComicGenerator initialized with base path:', this.basePath);
     },
 

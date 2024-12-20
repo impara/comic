@@ -18,6 +18,7 @@ class ComicGenerator
     private ImageComposer $imageComposer;
     private FileManager $fileManager;
     private array $cartoonifiedCharacters = [];
+    private string $cacheFile;
 
     public function __construct(LoggerInterface $logger)
     {
@@ -28,6 +29,48 @@ class ComicGenerator
         $this->storyParser = new StoryParser($logger);
         $this->imageComposer = new ImageComposer($logger);
         $this->fileManager = FileManager::getInstance($logger);
+
+        // Initialize cache
+        $this->cacheFile = $this->config->getTempPath() . 'cartoonified_cache.json';
+        $this->loadCache();
+    }
+
+    /**
+     * Load the cartoonification cache from disk
+     */
+    private function loadCache(): void
+    {
+        if (file_exists($this->cacheFile)) {
+            $cache = json_decode(file_get_contents($this->cacheFile), true);
+            if ($cache) {
+                $this->cartoonifiedCharacters = $cache;
+                $this->logger->info("Loaded cartoonification cache", [
+                    'cache_size' => count($cache)
+                ]);
+            }
+        }
+    }
+
+    /**
+     * Save the cartoonification cache to disk
+     */
+    private function saveCache(): void
+    {
+        file_put_contents($this->cacheFile, json_encode($this->cartoonifiedCharacters));
+        $this->logger->info("Saved cartoonification cache", [
+            'cache_size' => count($this->cartoonifiedCharacters)
+        ]);
+    }
+
+    /**
+     * Add a cartoonified character to the cache
+     */
+    private function addToCache(string $cacheKey, array $data): void
+    {
+        $this->cartoonifiedCharacters[$cacheKey] = array_merge($data, [
+            'cached_at' => time()
+        ]);
+        $this->saveCache();
     }
 
     /**
@@ -284,17 +327,21 @@ class ComicGenerator
     private function processCharacterForPanel(array $character, string $panelId, string $stateFile): array
     {
         try {
+            // Generate a unique cache key based on character ID and style
+            $cacheKey = $character['id'] . '_' . md5(json_encode($character['options'] ?? []));
+
             $this->logger->info("Processing character for panel", [
                 'character_id' => $character['id'],
-                'panel_id' => $panelId
+                'panel_id' => $panelId,
+                'cache_key' => $cacheKey
             ]);
 
             // Check cache first
-            $cacheKey = $character['id'] . '_' . ($character['options']['style'] ?? 'default');
             if (isset($this->cartoonifiedCharacters[$cacheKey])) {
                 $this->logger->info("Using cached cartoonified character", [
                     'character_id' => $character['id'],
-                    'cache_key' => $cacheKey
+                    'cache_key' => $cacheKey,
+                    'cached_url' => $this->cartoonifiedCharacters[$cacheKey]['output']
                 ]);
 
                 // Update panel state to reflect the cached result
@@ -315,11 +362,18 @@ class ComicGenerator
 
             // Skip cartoonification if the image is already a Replicate URL
             if (strpos($character['image'], 'replicate.delivery') !== false) {
+                $this->logger->info("Character image is already a Replicate URL", [
+                    'character_id' => $character['id'],
+                    'image_url' => $character['image']
+                ]);
+
                 // Cache the already cartoonified image
-                $this->cartoonifiedCharacters[$cacheKey] = [
+                $this->addToCache($cacheKey, [
                     'prediction_id' => $character['id'],
-                    'output' => $character['image']
-                ];
+                    'character_id' => $character['id'],
+                    'output' => $character['image'],
+                    'status' => 'completed'
+                ]);
 
                 return [
                     'id' => $character['id'],
@@ -329,11 +383,32 @@ class ComicGenerator
                 ];
             }
 
+            // Check if there's already a pending cartoonification for this character
+            foreach ($this->cartoonifiedCharacters as $existingKey => $existingChar) {
+                if (
+                    $existingChar['character_id'] === $character['id'] &&
+                    isset($existingChar['status']) &&
+                    $existingChar['status'] === 'pending' &&
+                    time() - ($existingChar['cached_at'] ?? 0) < 300
+                ) { // 5 minute timeout
+
+                    $this->logger->info("Character already has a pending cartoonification", [
+                        'character_id' => $character['id'],
+                        'existing_prediction' => $existingChar['prediction_id']
+                    ]);
+
+                    return [
+                        'status' => 'pending',
+                        'prediction_id' => $existingChar['prediction_id']
+                    ];
+                }
+            }
+
             // Start cartoonification with panel ID
             $cartoonificationResult = $this->replicateClient->cartoonify(
                 $character['image'],
                 $character['options'] ?? [],
-                $panelId  // Pass the panel ID
+                $panelId
             );
 
             $this->logger->info("Cartoonification started", [
@@ -343,13 +418,21 @@ class ComicGenerator
                 'status' => $cartoonificationResult['status'] ?? 'unknown'
             ]);
 
+            // Store in cache even if pending
+            $this->addToCache($cacheKey, [
+                'prediction_id' => $cartoonificationResult['id'],
+                'character_id' => $character['id'],
+                'status' => $cartoonificationResult['status'] ?? 'pending'
+            ]);
+
             // If cartoonification completed synchronously
             if (isset($cartoonificationResult['output'])) {
-                // Cache the result
-                $this->cartoonifiedCharacters[$cacheKey] = [
+                $this->addToCache($cacheKey, [
                     'prediction_id' => $cartoonificationResult['id'],
-                    'output' => $cartoonificationResult['output']
-                ];
+                    'character_id' => $character['id'],
+                    'output' => $cartoonificationResult['output'],
+                    'status' => 'completed'
+                ]);
 
                 $this->updatePanelState($stateFile, [
                     'prediction_id' => $cartoonificationResult['id'],
@@ -362,19 +445,19 @@ class ComicGenerator
                     'character' => $character,
                     'prediction_id' => $cartoonificationResult['id']
                 ];
-            } else {
-                // Asynchronous processing
-                $this->updatePanelState($stateFile, [
-                    'prediction_id' => $cartoonificationResult['id'],
-                    'character_id' => $character['id'],
-                    'status' => 'pending'
-                ]);
-
-                return [
-                    'status' => 'pending',
-                    'prediction_id' => $cartoonificationResult['id']
-                ];
             }
+
+            // Asynchronous processing
+            $this->updatePanelState($stateFile, [
+                'prediction_id' => $cartoonificationResult['id'],
+                'character_id' => $character['id'],
+                'status' => 'pending'
+            ]);
+
+            return [
+                'status' => 'pending',
+                'prediction_id' => $cartoonificationResult['id']
+            ];
         } catch (Exception $e) {
             $this->logger->error("Failed to process character for panel", [
                 'character_id' => $character['id'],
