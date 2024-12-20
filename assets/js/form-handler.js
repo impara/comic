@@ -1,7 +1,10 @@
 import { UIManager } from './ui-manager.js';
 import { ComicGenerator } from './comic-generator.js';
 
-export const FormHandler = {
+const FormHandler = {
+    // Version tracking
+    version: '1.0.2',
+
     // Configuration
     minChars: 50,
     maxChars: 500,
@@ -21,6 +24,13 @@ export const FormHandler = {
     ],
 
     init() {
+        // Bind all methods to this instance
+        Object.getOwnPropertyNames(Object.getPrototypeOf(this))
+            .filter(method => typeof this[method] === 'function')
+            .forEach(method => {
+                this[method] = this[method].bind(this);
+            });
+
         this.bindEvents();
         this.initializeCharacterCount();
         this.initializeFileUpload();
@@ -38,39 +48,27 @@ export const FormHandler = {
         });
 
         // Example prompts
-        $(document).on('click', '.example-prompt', (e) => this.handleExamplePrompt(e));
+        $(document).on('click', '.example-prompt', this.handleExamplePrompt);
 
         // Style selection
-        $(document).on('click', '.style-option', (e) => this.handleStyleSelection(e));
+        $(document).on('click', '.style-option', this.handleStyleSelection);
 
         // Background selection
-        $(document).on('click', '.background-option', (e) => this.handleBackgroundSelection(e));
+        $(document).on('click', '.background-option', this.handleBackgroundSelection);
 
         // Character selection
-        $(document).on('click', '.character-option', (e) => this.handleCharacterSelection(e));
+        $(document).on('click', '.character-option', this.handleCharacterSelection);
 
         // Character upload
-        $('#uploadCharacter').on('click', () => this.handleCharacterUpload());
-        $('#characterImage').on('change', (e) => this.handleCharacterImagePreview(e));
-        $('#characterName').on('input', (e) => this.handleCharacterNameInput(e));
+        $('#uploadCharacter').on('click', this.handleCharacterUpload);
+        $('#characterImage').on('change', this.handleCharacterImagePreview);
+        $('#characterName').on('input', this.handleCharacterNameInput);
 
         // Navigation buttons
-        $('#next-step-1').on('click', (e) => {
-            e.preventDefault();
-            this.handleNextStep1();
-        });
-        $('#next-step-2').on('click', (e) => {
-            e.preventDefault();
-            this.handleNextStep2();
-        });
-        $('#back-step-2').on('click', (e) => {
-            e.preventDefault();
-            this.handleBackStep(1);
-        });
-        $('#back-step-3').on('click', (e) => {
-            e.preventDefault();
-            this.handleBackStep(2);
-        });
+        $('#next-step-1').on('click', this.handleNextStep1);
+        $('#next-step-2').on('click', this.handleNextStep2);
+        $('#back-step-2').on('click', () => this.handleBackStep(1));
+        $('#back-step-3').on('click', () => this.handleBackStep(2));
 
         // Add Pay Now button handler
         $('#payButton').on('click', (e) => {
@@ -625,13 +623,15 @@ export const FormHandler = {
         this.resetCharacterPreview();
     },
 
-    handleNextStep1() {
+    handleNextStep1(e) {
+        e.preventDefault();
         if (this.validateStep1()) {
             document.dispatchEvent(new CustomEvent('changeStep', { detail: { step: 2 } }));
         }
     },
 
-    handleNextStep2() {
+    handleNextStep2(e) {
+        e.preventDefault();
         if (this.validateStep2()) {
             document.dispatchEvent(new CustomEvent('changeStep', { detail: { step: 3 } }));
         }
@@ -1121,4 +1121,7 @@ export const FormHandler = {
         // Add any step 3 validation logic here
         return true;
     }
-}; 
+};
+
+// Export the FormHandler object
+export { FormHandler }; 
