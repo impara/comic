@@ -1,5 +1,5 @@
 import { CONFIG } from './config.js';
-import { storyExamples } from './story-examples.js';
+import storyExamples from './story-examples.js';
 import { UIManager } from './ui-manager.js';
 import { FormHandler } from './form-handler.js';
 import { ComicGenerator } from './comic-generator.js';

@@ -1,19 +1,20 @@
 // Story examples for the comic generator
 const storyExamples = [
     {
-        title: "Manga Style: Training Journey",
-        text: "In a misty mountain dojo, Young Kai nervously grips a wooden sword while Master Chen watches calmly. Master Chen steps forward, his movements fluid and graceful as he demonstrates an ancient sword technique, energy visibly swirling around his blade. Kai attempts to copy the move but stumbles, frustration clear on his face. Master Chen gently corrects Kai's stance, speaking words of encouragement.",
-        style: "manga"
+        title: "Superhero Adventure",
+        text: "A young hero discovers their powers while trying to save their city from an unexpected threat. With the help of a wise mentor, they must learn to control their abilities and protect those they love."
     },
     {
-        title: "Superhero Style: City Rescue",
-        text: "High above the bustling city, Captain Thunder soars through storm clouds, his cape billowing. Below, a runaway bus careens towards a busy intersection. With lightning speed, he dives down, landing in front of the bus. His muscles strain as he plants his feet and catches the vehicle, gradually bringing it to a safe stop while amazed citizens watch and cheer.",
-        style: "superhero"
+        title: "Magical Discovery",
+        text: "In a hidden corner of an ancient library, a curious student finds a mysterious book that opens a portal to a world of magic. They must navigate this new realm while keeping their discovery a secret."
     },
     {
-        title: "Pixel Art: Dungeon Adventure",
-        text: "In a dimly lit dungeon chamber, brave knight Sarah cautiously approaches a treasure chest while her companion, the wizard Marcus, holds up a glowing staff for light. Suddenly, the chest springs to life - a mimic! Sarah raises her shield just in time as Marcus prepares a spell, magical particles swirling around his staff.",
-        style: "pixel"
+        title: "Space Explorer",
+        text: "An astronaut on a routine mission encounters an anomaly that leads them to an undiscovered planet. With limited resources and time running out, they must find a way to communicate their finding back to Earth."
+    },
+    {
+        title: "Animal Friends",
+        text: "A lonely pet discovers a secret gathering of neighborhood animals who meet at night to share stories and help each other. They welcome their new friend and embark on exciting adventures together."
     }
 ];
 
