@@ -626,13 +626,13 @@ export const FormHandler = {
     },
 
     handleNextStep1() {
-        if (this.validateStep1()) {
+        if (FormHandler.validateStep1()) {
             document.dispatchEvent(new CustomEvent('changeStep', { detail: { step: 2 } }));
         }
     },
 
     handleNextStep2() {
-        if (this.validateStep2()) {
+        if (FormHandler.validateStep2()) {
             document.dispatchEvent(new CustomEvent('changeStep', { detail: { step: 3 } }));
         }
     },
