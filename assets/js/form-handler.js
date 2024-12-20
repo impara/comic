@@ -31,10 +31,13 @@ const FormHandler = {
                 this[method] = this[method].bind(this);
             });
 
-        this.bindEvents();
-        this.initializeCharacterCount();
-        this.initializeFileUpload();
-        this.initializeEventHandlers();
+        // Wait for DOM to be ready
+        $(document).ready(() => {
+            this.bindEvents();
+            this.initializeCharacterCount();
+            this.initializeFileUpload();
+            this.initializeEventHandlers();
+        });
     },
 
     bindEvents() {
@@ -390,14 +393,26 @@ const FormHandler = {
 
     initializeCharacterCount() {
         const $storyInput = $('#story-input');
+        if (!$storyInput.length) {
+            console.warn('Story input element not found');
+            return;
+        }
         const currentLength = $storyInput.val().length;
         $('#currentCount').text(currentLength);
         this.updateNextButtonState(currentLength);
     },
 
     updateCharacterCount() {
-        const currentLength = $('#story-input').val().length;
-        $('#currentCount').text(currentLength);
+        const $storyInput = $('#story-input');
+        const $currentCount = $('#currentCount');
+
+        if (!$storyInput.length || !$currentCount.length) {
+            console.warn('Required elements for character count not found');
+            return;
+        }
+
+        const currentLength = $storyInput.val().length;
+        $currentCount.text(currentLength);
         this.updateNextButtonState(currentLength);
     },
 
