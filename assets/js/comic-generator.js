@@ -14,19 +14,27 @@ export const ComicGenerator = {
         if (response.success) {
             console.log('Comic generation initiated:', response.result);
 
-            // Store the original panel ID first - updated to use new field name
-            const originalPanelId = response.result.original_panel_id || response.result.id;
-            this.originalPanelId = originalPanelId;  // Store globally
+            // Store the strip ID
+            this.stripId = response.result.id;
 
-            console.log('Setting up cartoonification tracking with original panel ID:', originalPanelId);
-
-            // Initialize cartoonification state with original panel ID
-            if (response.result.pending_predictions) {
-                response.result.pending_predictions.forEach(predId => {
-                    this.cartoonificationState.set(predId, {
+            // Initialize tracking for each panel's cartoonifications
+            if (response.result.pending_panels) {
+                response.result.pending_panels.forEach(panelId => {
+                    console.log('Setting up tracking for panel:', panelId);
+                    // Create state tracking for this panel
+                    this.cartoonificationState.set(panelId, {
                         status: 'pending',
                         started_at: new Date().getTime(),
-                        original_panel_id: originalPanelId // Updated field name
+                        strip_id: this.stripId,
+                        panel_id: panelId,  // Add panel_id for tracking
+                        cartoonification_requests: new Map()
+                    });
+
+                    // Log the tracking setup
+                    console.log('Panel tracking initialized:', {
+                        panel_id: panelId,
+                        strip_id: this.stripId,
+                        state: this.cartoonificationState.get(panelId)
                     });
                 });
             }
@@ -34,17 +42,18 @@ export const ComicGenerator = {
             // Update UI to show progress
             $('#debugInfo').html(`
                 <p>Generation started successfully</p>
-                <p>Panel ID: ${originalPanelId}</p>
+                <p>Strip ID: ${this.stripId}</p>
+                <p>Total Panels: ${response.result.total_panels}</p>
                 <p>Status: ${response.result.status}</p>
-                ${response.result.pending_predictions ?
-                    `<p>Waiting for cartoonification: ${response.result.pending_predictions.join(', ')}</p>` : ''}
+                ${response.result.pending_panels ?
+                    `<p>Pending Panels: ${response.result.pending_panels.join(', ')}</p>` : ''}
             `);
 
             // Update progress bar
             $('.progress-bar').css('width', '25%');
 
             // Start checking for results using state file
-            this.checkResult(originalPanelId);
+            this.checkResult(this.stripId);
         } else {
             console.error('Comic generation returned error:', response.message);
             this.handleGenerationError(response.message);
@@ -181,20 +190,16 @@ export const ComicGenerator = {
         return null;
     },
 
-    checkResult(panelId) {
-        if (!panelId) {
-            console.error('Invalid panel ID provided');
-            this.handleGenerationError('Invalid panel ID');
+    checkResult(stripId) {
+        if (!stripId) {
+            console.error('Invalid strip ID provided');
+            this.handleGenerationError('Invalid strip ID');
             return;
         }
 
         // First check the state file
-        const stateUrl = this.getApiUrl(`public/temp/state_${panelId}.json`);
-        console.log('Checking state file:', stateUrl);
-
-        // Get the final panel URL
-        const panelUrl = this.getApiUrl(`public/temp/${panelId}.json`);
-        console.log('Final panel URL:', panelUrl);
+        const stateUrl = this.getApiUrl(`public/temp/strip_state_${stripId}.json`);
+        console.log('Checking strip state file:', stateUrl);
 
         // Clear any existing polling interval
         if (this.pollingInterval) {
@@ -213,7 +218,7 @@ export const ComicGenerator = {
                 type: 'GET',
                 dataType: 'json',
                 success: (state) => {
-                    console.log('State update received:', state);
+                    console.log('Strip state update received:', state);
                     retryCount = 0;  // Reset retry count on success
 
                     // Validate state structure
@@ -225,125 +230,81 @@ export const ComicGenerator = {
 
                     // Log state transitions
                     if (lastStatus !== state.status) {
-                        console.log(`State transition: ${lastStatus || 'initial'} -> ${state.status}`);
+                        console.log(`Strip state transition: ${lastStatus || 'initial'} -> ${state.status}`);
                         lastStatus = state.status;
                     }
 
                     // Update progress based on state
-                    if (state.status === 'cartoonification_complete') {
-                        $('.progress-bar').css('width', '75%');
-                        $('#debugInfo').html(`
-                            <p>Cartoonification complete, generating final panel...</p>
-                            <p>Panel ID: ${panelId}</p>
-                            ${state.sdxl_status ? `<p>SDXL Status: ${state.sdxl_status}</p>` : ''}
-                        `);
-                    } else if (state.status === 'succeeded') {
-                        // Final success state
-                        clearInterval(this.pollingInterval);
-                        this.pollingInterval = null;
+                    if (state.panels) {
+                        const totalPanels = state.panels.length;
+                        const completedPanels = state.panels.filter(p => p.status === 'succeeded').length;
+                        const failedPanels = state.panels.filter(p => p.status === 'failed').length;
+                        const progress = (completedPanels / totalPanels) * 100;
 
-                        $('.progress-bar').css('width', '100%');
-                        $('#debugInfo').html(`
-                            <p>Comic panel generated successfully!</p>
-                            <p>Panel ID: ${panelId}</p>
-                        `);
+                        // Update cartoonification state for each panel
+                        state.panels.forEach((panel, index) => {
+                            const panelId = panel.id;
+                            if (this.cartoonificationState.has(panelId)) {
+                                const currentState = this.cartoonificationState.get(panelId);
 
-                        // Get the final result
-                        $.ajax({
-                            url: panelUrl,
-                            type: 'GET',
-                            dataType: 'json',
-                            success: (result) => {
-                                console.log('Final result received:', result);
-                                this.handleFinalResult(result);
-                            },
-                            error: (xhr, status, error) => {
-                                console.error('Error getting final result:', error);
-                                this.handleGenerationError('Failed to get final result');
+                                // Log panel state update
+                                console.log(`Panel ${panelId} state update:`, {
+                                    previous: currentState.status,
+                                    new: panel.status,
+                                    panel_data: panel
+                                });
+
+                                // Update panel state
+                                currentState.status = panel.status;
+                                currentState.updated_at = new Date().getTime();
+                                if (panel.cartoonification_requests) {
+                                    panel.cartoonification_requests.forEach(request => {
+                                        currentState.cartoonification_requests.set(request.prediction_id, request);
+                                    });
+                                }
+                                this.cartoonificationState.set(panelId, currentState);
                             }
                         });
-                    } else if (state.status === 'failed' || state.sdxl_status === 'failed') {
-                        // Handle failure state
-                        clearInterval(this.pollingInterval);
-                        this.pollingInterval = null;
 
-                        // Get the most specific error message available
-                        const errorMessage = state.sdxl_error ||
-                            state.error ||
-                            state.cartoonification_requests?.find(r => r.error)?.error ||
-                            'Generation failed';
+                        $('.progress-bar').css('width', `${progress}%`);
 
-                        this.handleGenerationError(errorMessage);
-                    } else {
-                        // Update progress for cartoonification
-                        const completedRequests = state.cartoonification_requests?.filter(r => r.status === 'succeeded')?.length || 0;
-                        const totalRequests = state.cartoonification_requests?.length || 0;
+                        $('#debugInfo').html(`
+                            <p>Generating comic strip...</p>
+                            <p>Strip ID: ${stripId}</p>
+                            <p>Progress: ${completedPanels}/${totalPanels} panels completed</p>
+                            ${failedPanels > 0 ? `<p class="text-danger">${failedPanels} panels failed</p>` : ''}
+                            <p>Status: ${state.status}</p>
+                        `);
 
-                        // Check for any failed requests
-                        const failedRequests = state.cartoonification_requests?.filter(r => r.status === 'failed') || [];
-                        if (failedRequests.length > 0) {
+                        // Check for completion or failure
+                        if (failedPanels > 0) {
                             clearInterval(this.pollingInterval);
                             this.pollingInterval = null;
-                            this.handleGenerationError(failedRequests[0].error || 'Character processing failed');
+                            this.handleGenerationError('One or more panels failed to generate');
                             return;
                         }
 
-                        if (totalRequests > 0) {
-                            const progress = (completedRequests / totalRequests) * 50 + 25; // 25-75% range for cartoonification
-                            $('.progress-bar').css('width', `${progress}%`);
+                        if (completedPanels === totalPanels && state.status === 'completed') {
+                            clearInterval(this.pollingInterval);
+                            this.pollingInterval = null;
+                            this.handleFinalResult(state);
                         }
-
-                        $('#debugInfo').html(`
-                            <p>Processing characters: ${completedRequests}/${totalRequests}</p>
-                            <p>Panel ID: ${panelId}</p>
-                            <p>Status: ${state.status}</p>
-                            ${state.cartoonification_requests?.length ?
-                                `<p>Cartoonification progress: ${completedRequests}/${totalRequests}</p>` : ''}
-                            ${state.sdxl_status ?
-                                `<p>SDXL status: ${state.sdxl_status}</p>` : ''}
-                        `);
                     }
                 },
                 error: (xhr, status, error) => {
-                    console.error('Error checking state:', {
+                    console.error('Error checking strip state:', {
                         status: status,
                         error: error,
                         response: xhr.responseText,
-                        retry_count: retryCount,
-                        xhr_status: xhr.status
+                        retry_count: retryCount
                     });
 
                     retryCount++;
-
-                    // Handle specific error cases
-                    if (status === 'timeout') {
-                        if (retryCount >= maxRetries) {
-                            clearInterval(this.pollingInterval);
-                            this.pollingInterval = null;
-                            this.handleGenerationError('Server is not responding, please try again');
-                            return;
-                        }
-                    } else if (xhr.status === 404) {
-                        // State file not found yet, this is normal at the start
-                        $('#debugInfo').html(`
-                            <p>Initializing generation...</p>
-                            <p>Panel ID: ${panelId}</p>
-                        `);
-                        return;
-                    } else if (retryCount >= maxRetries) {
+                    if (retryCount >= maxRetries) {
                         clearInterval(this.pollingInterval);
                         this.pollingInterval = null;
                         this.handleGenerationError('Failed to check generation status after multiple retries');
-                        return;
                     }
-
-                    // Update UI with retry status
-                    $('#debugInfo').html(`
-                        <p>Waiting for processing to start...</p>
-                        <p>Panel ID: ${panelId}</p>
-                        <p class="text-warning">Retry ${retryCount}/${maxRetries}</p>
-                        ${status === 'timeout' ? '<p class="text-warning">Server is taking longer than expected to respond</p>' : ''}
-                    `);
                 },
                 timeout: 10000  // 10 second timeout
             });

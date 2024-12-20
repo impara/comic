@@ -552,15 +552,13 @@ class ComicGenerator
         $pendingFile = $this->config->getTempPath() . "pending_{$predictionId}.json";
         file_put_contents($pendingFile, json_encode([
             'prediction_id' => $predictionId,
-            'panel_id' => $panelId,
+            'original_panel_id' => $panelId,
             'stage' => 'cartoonify',
-            'next_stage' => 'sdxl',
             'character_id' => $character['id'],
             'character_data' => $character,
             'panel_data' => [
                 'story' => $story,
-                'characters' => [$character],
-                'options' => $character['options'] ?? []
+                'characters' => [$character]
             ],
             'started_at' => time()
         ]));

@@ -136,9 +136,17 @@ class ReplicateClient
                     'original_panel_id' => $originalPanelId,
                     'stage' => 'cartoonify',
                     'created_at' => time(),
-                    'options' => $options
+                    'options' => $options,
+                    'panel_id' => $originalPanelId
                 ];
                 file_put_contents($pendingFile, json_encode($pendingData));
+
+                // Log pending file creation
+                $this->logger->info("Created pending file for cartoonification", [
+                    'prediction_id' => $result['id'],
+                    'original_panel_id' => $originalPanelId,
+                    'pending_file' => basename($pendingFile)
+                ]);
             }
 
             return $result;
