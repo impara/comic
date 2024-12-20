@@ -32,18 +32,29 @@ class StoryParser implements StoryParserInterface
             // Build the segmentation prompt with clear instructions
             $prompt = $this->buildSegmentationPrompt($story, $panelCount);
 
+            // Log the prompt we're sending
+            $this->logger->info('Sending prompt to NLP model', [
+                'prompt' => $prompt,
+                'panel_count' => $panelCount
+            ]);
+
             // Call Replicate NLP model with optimized parameters
             $result = $this->replicateClient->predict('nlp', [
                 'prompt' => $prompt,
                 'max_length' => 2048,
-                'temperature' => 0.7, // Lower temperature for more focused outputs
-                'top_p' => 0.8,      // More focused sampling
-                'repetition_penalty' => 1.2
+                'temperature' => 0.5,  // Lower temperature for more deterministic output
+                'top_p' => 0.9,       // Slightly higher top_p for more natural language
+                'repetition_penalty' => 1.1  // Lower repetition penalty for more natural responses
             ]);
 
             if (empty($result)) {
                 throw new RuntimeException('Failed to get valid response from NLP model');
             }
+
+            // Log the raw result
+            $this->logger->info('Received NLP model response', [
+                'raw_result' => $result
+            ]);
 
             // Process and validate the segmented panels
             $panels = $this->parseNLPResponse($result[0]);
@@ -70,11 +81,18 @@ Requirements:
 3. Include key actions, emotions, and settings
 4. Keep descriptions concise but detailed
 5. Focus on visual elements and actions
+6. For short stories, break down key moments into separate panels:
+   - Setting establishment
+   - Character introduction
+   - Action/conflict moments
+   - Resolution/emotional beats
 
 Format your response as:
 Panel 1: [visual description]
 Panel 2: [visual description]
 ...and so on.
+
+For this story, ensure you create exactly {$panelCount} panels by breaking down the narrative into key visual moments, even if the story is short.
 
 Story:
 {$story}
@@ -85,7 +103,19 @@ EOT;
 
     private function parseNLPResponse(string $response): array
     {
-        $this->logger->info('Parsing NLP response', ['response_length' => strlen($response)]);
+        $this->logger->info('Parsing NLP response', [
+            'response_length' => strlen($response),
+            'raw_response' => $response // Log the actual response
+        ]);
+
+        // Validate response is not empty or too short
+        if (empty($response) || strlen($response) < 10) {
+            $this->logger->error('Invalid NLP response', [
+                'response' => $response,
+                'length' => strlen($response)
+            ]);
+            throw new RuntimeException('NLP model returned an invalid or empty response');
+        }
 
         // Split response into lines and clean up
         $lines = array_filter(
@@ -94,6 +124,12 @@ EOT;
                 return !empty($line) && $line !== "\n";
             }
         );
+
+        // Log the cleaned lines for debugging
+        $this->logger->info('Cleaned response lines', [
+            'line_count' => count($lines),
+            'lines' => $lines
+        ]);
 
         // Extract panel descriptions using regex
         $panels = [];
@@ -106,6 +142,21 @@ EOT;
                 // Store panel with its number for proper ordering
                 $panels[$panelNumber] = $description;
             }
+        }
+
+        // Log extracted panels
+        $this->logger->info('Extracted panels', [
+            'panel_count' => count($panels),
+            'panels' => $panels
+        ]);
+
+        // Validate we got some panels
+        if (empty($panels)) {
+            $this->logger->error('No panels extracted from response', [
+                'lines' => $lines,
+                'response' => $response
+            ]);
+            throw new RuntimeException('Failed to extract any valid panels from NLP response');
         }
 
         // Sort panels by number and return just the descriptions
@@ -175,12 +226,14 @@ EOT;
         $dialogueCount = preg_match_all('/["\'](.*?)[\'"]/i', $story, $matches);
 
         // Enhanced heuristic:
-        // - Base count: 1 panel per 2-3 sentences
+        // - Base count: 1 panel per 1.5-2 sentences (more panels for shorter stories)
+        // - Minimum 2 panels for any story
         // - Adjust for dialogue density
         // - Consider word count for complexity
-        $baseCount = ceil($sentenceCount / 2.5);
+        $baseCount = max(2, ceil($sentenceCount / 1.5));
         $dialogueAdjustment = ceil($dialogueCount / 2);
-        $suggestedCount = $baseCount + $dialogueAdjustment;
+        $wordCountAdjustment = $wordCount > 50 ? ceil(($wordCount - 50) / 30) : 0;
+        $suggestedCount = $baseCount + $dialogueAdjustment + $wordCountAdjustment;
 
         // Ensure within limits
         $suggestedCount = max($minPanels, min($maxPanels, $suggestedCount));
@@ -191,6 +244,7 @@ EOT;
             'dialogue_count' => $dialogueCount,
             'base_count' => $baseCount,
             'dialogue_adjustment' => $dialogueAdjustment,
+            'word_count_adjustment' => $wordCountAdjustment,
             'final_count' => $suggestedCount
         ]);
 
