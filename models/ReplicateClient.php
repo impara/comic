@@ -331,24 +331,19 @@ class ReplicateClient
             // Merge default parameters with provided ones
             $modelParams = array_merge($modelConfig['params'], $params);
 
-            // Get the webhook URL from config
-            $webhookUrl = $this->config->getBaseUrl() . '/webhook.php';
-
-            // Make the API call
-            $result = $this->httpClient->post('https://api.replicate.com/v1/predictions', [
-                'version' => $modelConfig['version'],
-                'input' => $modelParams,
-                'webhook' => $webhookUrl,
-                'webhook_events_filter' => ['completed']
-            ]);
-
-            $this->logger->info("Prediction initiated", [
-                'model_type' => $modelType,
-                'result' => $result
-            ]);
-
-            // For synchronous models (like NLP), wait for completion
+            // For NLP model, we'll handle it synchronously without webhooks
             if ($modelType === 'nlp') {
+                // Make the API call without webhook
+                $result = $this->httpClient->post('https://api.replicate.com/v1/predictions', [
+                    'version' => $modelConfig['version'],
+                    'input' => $modelParams
+                ]);
+
+                $this->logger->info("NLP prediction initiated", [
+                    'prediction_id' => $result['id'],
+                    'status' => $result['status']
+                ]);
+
                 // Poll for results
                 $maxAttempts = 30;
                 $attempt = 0;
@@ -372,20 +367,6 @@ class ReplicateClient
                             ]);
                             throw new RuntimeException("NLP model returned empty output");
                         }
-
-                        // For NLP model, ensure we have a string response
-                        if ($modelType === 'nlp') {
-                            if (!is_array($status['output']) || empty($status['output'][0]) || !is_string($status['output'][0])) {
-                                $this->logger->error("Invalid NLP model output format", [
-                                    'prediction_id' => $result['id'],
-                                    'output' => $status['output']
-                                ]);
-                                throw new RuntimeException("Invalid NLP model output format");
-                            }
-                            // Return just the string response
-                            return [$status['output'][0]];
-                        }
-
                         return $status['output'];
                     } elseif ($status['status'] === 'failed') {
                         $errorMsg = $status['error'] ?? 'Unknown error';
@@ -401,6 +382,20 @@ class ReplicateClient
                 }
                 throw new RuntimeException("Prediction timed out after {$maxAttempts} attempts");
             }
+
+            // For other models, use webhook
+            $webhookUrl = $this->config->getBaseUrl() . '/webhook.php';
+            $result = $this->httpClient->post('https://api.replicate.com/v1/predictions', [
+                'version' => $modelConfig['version'],
+                'input' => $modelParams,
+                'webhook' => $webhookUrl,
+                'webhook_events_filter' => ['completed']
+            ]);
+
+            $this->logger->info("Prediction initiated", [
+                'model_type' => $modelType,
+                'result' => $result
+            ]);
 
             return $result;
         } catch (Exception $e) {

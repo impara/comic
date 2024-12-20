@@ -25,63 +25,93 @@ class StoryParser implements StoryParserInterface
             'options' => $options
         ]);
 
-        try {
-            // Get optimal panel count based on story length and complexity
-            $panelCount = $this->getOptimalPanelCount($story);
+        $maxAttempts = 3;
+        $attempt = 0;
+        $lastError = null;
 
-            // Build the segmentation prompt with clear instructions
-            $prompt = $this->buildSegmentationPrompt($story, $panelCount);
-
-            // Log the prompt we're sending
-            $this->logger->info('Sending prompt to NLP model', [
-                'prompt' => $prompt,
-                'panel_count' => $panelCount
-            ]);
-
-            // Call Replicate NLP model with optimized parameters
-            $result = $this->replicateClient->predict('nlp', [
-                'prompt' => $prompt,
-                'max_length' => 2048,
-                'temperature' => 0.75,  // Default temperature for more balanced output
-                'top_p' => 0.9,        // Standard top_p for natural language
-                'repetition_penalty' => 1.2  // Standard repetition penalty
-            ]);
-
-            if (empty($result) || !is_array($result) || empty($result[0])) {
-                $this->logger->error('Invalid NLP model response structure', [
-                    'result' => $result
+        while ($attempt < $maxAttempts) {
+            try {
+                $attempt++;
+                $this->logger->info('Attempting story segmentation', [
+                    'attempt' => $attempt,
+                    'max_attempts' => $maxAttempts
                 ]);
-                throw new RuntimeException('NLP model returned an invalid response structure');
-            }
 
-            // Log the raw result
-            $this->logger->info('Received NLP model response', [
-                'raw_result' => $result,
-                'response_text' => $result[0]
-            ]);
+                // Get optimal panel count based on story length and complexity
+                $panelCount = $this->getOptimalPanelCount($story);
 
-            // Process and validate the segmented panels
-            $panels = $this->parseNLPResponse($result[0]);
+                // Build the segmentation prompt with clear instructions
+                $prompt = $this->buildSegmentationPrompt($story, $panelCount);
 
-            // Validate panel count
-            if (count($panels) < 2) {
-                $this->logger->error('Insufficient panels generated', [
-                    'panel_count' => count($panels),
-                    'panels' => $panels,
-                    'raw_response' => $result[0]
+                // Log the prompt we're sending
+                $this->logger->info('Sending prompt to NLP model', [
+                    'prompt' => $prompt,
+                    'panel_count' => $panelCount,
+                    'attempt' => $attempt
                 ]);
-                throw new RuntimeException('Not enough valid panels generated from NLP response');
-            }
 
-            return $this->processPanelDescriptions($panels);
-        } catch (Exception $e) {
-            $this->logger->error('Story segmentation failed', [
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-                'story_preview' => substr($story, 0, 100) . '...'
-            ]);
-            throw new RuntimeException('Failed to segment story: ' . $e->getMessage());
+                // Call Replicate NLP model with optimized parameters
+                $result = $this->replicateClient->predict('nlp', [
+                    'prompt' => $prompt,
+                    'max_length' => 2048,
+                    'temperature' => 0.7 + ($attempt * 0.1),  // Increase temperature slightly with each attempt
+                    'top_p' => 0.9,
+                    'repetition_penalty' => 1.2
+                ]);
+
+                if (empty($result) || !is_array($result) || empty($result[0])) {
+                    throw new RuntimeException('NLP model returned an invalid response structure');
+                }
+
+                $response = $result[0];
+
+                // Check for truncated or invalid response
+                if (strlen($response) < 50 || !preg_match('/Panel \d+:/i', $response)) {
+                    throw new RuntimeException('NLP model returned a truncated or invalid response');
+                }
+
+                // Log the raw result
+                $this->logger->info('Received NLP model response', [
+                    'raw_result' => $result,
+                    'response_text' => $response,
+                    'response_length' => strlen($response),
+                    'attempt' => $attempt
+                ]);
+
+                // Process and validate the segmented panels
+                $panels = $this->parseNLPResponse($response);
+
+                // Validate panel count
+                if (count($panels) < 2) {
+                    throw new RuntimeException('Not enough valid panels generated from NLP response');
+                }
+
+                return $this->processPanelDescriptions($panels);
+            } catch (Exception $e) {
+                $lastError = $e;
+                $this->logger->warning('Story segmentation attempt failed', [
+                    'attempt' => $attempt,
+                    'error' => $e->getMessage(),
+                    'will_retry' => $attempt < $maxAttempts
+                ]);
+
+                // If this is the last attempt, throw the error
+                if ($attempt >= $maxAttempts) {
+                    $this->logger->error('Story segmentation failed after all attempts', [
+                        'total_attempts' => $attempt,
+                        'final_error' => $e->getMessage(),
+                        'story_preview' => substr($story, 0, 100) . '...'
+                    ]);
+                    throw new RuntimeException('Failed to segment story after ' . $attempt . ' attempts: ' . $e->getMessage());
+                }
+
+                // Wait a bit before retrying
+                sleep(1);
+            }
         }
+
+        // This should never be reached due to the throw in the loop
+        throw new RuntimeException('Failed to segment story: ' . ($lastError ? $lastError->getMessage() : 'Unknown error'));
     }
 
     private function buildSegmentationPrompt(string $story, int $panelCount): string
