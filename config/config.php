@@ -57,7 +57,11 @@ return [
                 'params' => [
                     'seed' => 2862431,
                     'image' => null  // Will be set dynamically
-                ]
+                ],
+                'max_concurrent' => 2,  // Limit concurrent cartoonify operations
+                'timeout' => 180,       // 3 minute timeout for cartoonify
+                'retry_delay' => 5,     // Wait 5 seconds between retries
+                'max_retries' => 2      // Maximum number of retries per request
             ],
             'nlp' => [
                 'version' => '2c1608e18606fad2812020dc541930f2d0495ce32eee50074220b87300bc16e1',
@@ -73,7 +77,7 @@ return [
     ],
 
     'comic_strip' => [
-        'max_panels' => 6,
+        'max_panels' => 4,
         'min_panels' => 2,
         'panel_gap' => 20,
         'strip_padding' => 40,

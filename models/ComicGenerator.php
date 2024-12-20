@@ -328,7 +328,10 @@ class ComicGenerator
     {
         try {
             // Generate a unique cache key based on character ID and style
-            $cacheKey = $character['id'] . '_' . md5(json_encode($character['options'] ?? []));
+            $cacheKey = $character['id'] . '_' . md5(json_encode(array_diff_key(
+                $character['options'] ?? [],
+                ['panel_index' => true, 'panel_position' => true] // Exclude panel-specific options
+            )));
 
             $this->logger->info("Processing character for panel", [
                 'character_id' => $character['id'],
@@ -387,20 +390,35 @@ class ComicGenerator
             foreach ($this->cartoonifiedCharacters as $existingKey => $existingChar) {
                 if (
                     $existingChar['character_id'] === $character['id'] &&
-                    isset($existingChar['status']) &&
-                    $existingChar['status'] === 'pending' &&
-                    time() - ($existingChar['cached_at'] ?? 0) < 300
-                ) { // 5 minute timeout
+                    isset($existingChar['status'])
+                ) {
+                    // If completed, use it
+                    if ($existingChar['status'] === 'completed') {
+                        return [
+                            'status' => 'completed',
+                            'character' => $character,
+                            'prediction_id' => $existingChar['prediction_id'],
+                            'output' => $existingChar['output']
+                        ];
+                    }
 
-                    $this->logger->info("Character already has a pending cartoonification", [
-                        'character_id' => $character['id'],
-                        'existing_prediction' => $existingChar['prediction_id']
-                    ]);
+                    // If pending and within timeout window, wait
+                    if (
+                        $existingChar['status'] === 'pending' &&
+                        time() - ($existingChar['cached_at'] ?? 0) < $this->config->get('replicate.models.cartoonify.timeout', 180)
+                    ) {
+                        return [
+                            'status' => 'pending',
+                            'character' => $character,
+                            'prediction_id' => $existingChar['prediction_id']
+                        ];
+                    }
 
-                    return [
-                        'status' => 'pending',
-                        'prediction_id' => $existingChar['prediction_id']
-                    ];
+                    // If pending but timed out, remove from cache
+                    if ($existingChar['status'] === 'pending') {
+                        unset($this->cartoonifiedCharacters[$existingKey]);
+                        $this->saveCache();
+                    }
                 }
             }
 
