@@ -137,17 +137,20 @@ export const ComicGenerator = {
      * Update progress UI
      */
     updateProgress(state) {
+        // Update progress bar
         const progress = state.progress || 0;
         this.uiManager.updateProgress(progress);
 
         // Update debug info if available
-        if (state.panels) {
-            const totalPanels = state.panels.length;
-            const completedPanels = state.panels.filter(p => p.status === 'completed').length;
+        if (state.characters) {
+            const totalCharacters = Object.keys(state.characters).length;
+            const completedCharacters = Object.values(state.characters)
+                .filter(c => c.status === 'completed').length;
+
             this.uiManager.updateDebugInfo({
                 stripId: this.stripId,
-                totalPanels,
-                completedPanels,
+                totalCharacters,
+                completedCharacters,
                 status: state.status
             });
         }
@@ -162,6 +165,8 @@ export const ComicGenerator = {
 
         if (state.output_path) {
             this.uiManager.displayResult(state.output_path);
+        } else {
+            console.warn('No output path in completion state:', state);
         }
     }
 }; 

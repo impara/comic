@@ -37,68 +37,47 @@ class ComicGenerator
     /**
      * Generate a complete comic strip from a story
      */
-    public function generateComicStrip(string $story, array $characters, array $options = []): array
+    public function generateComicStrip(array $characters, array $options = []): array
     {
-        $this->logger->info("Starting comic strip generation", [
-            'story_length' => strlen($story),
-            'character_count' => count($characters)
-        ]);
-
         try {
-            // Generate strip ID and initialize state
-            $stripId = 'strip_' . uniqid('', true);
-            $state = $this->stateManager->initializeStrip($stripId, $options);
+            // Initialize strip ID and state
+            $stripId = uniqid('strip_');
+            $this->logger->info('Starting comic generation', [
+                'strip_id' => $stripId,
+                'character_count' => count($characters)
+            ]);
 
             // Process characters
-            $processedCharacters = $this->characterProcessor->processCharacters($characters, array_merge($options, [
-                'strip_id' => $stripId
-            ]));
-            $this->stateManager->updateStripState($stripId, ['characters' => $processedCharacters]);
+            $processedCharacters = $this->characterProcessor->processCharacters($characters, $stripId);
 
-            // Segment story into panels
-            $panelDescriptions = $this->storyParser->segmentStory($story, $options);
-            $this->stateManager->updateStripState($stripId, ['total_panels' => count($panelDescriptions)]);
+            // Initialize strip state
+            $stripState = [
+                'id' => $stripId,
+                'status' => 'processing',
+                'characters' => $processedCharacters,
+                'progress' => 0,
+                'created_at' => time()
+            ];
 
-            // Generate each panel
-            $pendingPanels = [];
-            foreach ($panelDescriptions as $index => $description) {
-                $panelId = 'panel_' . uniqid('', true);
-                $panelOptions = array_merge($options, [
-                    'strip_id' => $stripId,
-                    'panel_index' => $index
-                ]);
-
-                // Initialize panel state
-                $this->stateManager->initializePanel($stripId, $panelId, $description, $panelOptions);
-
-                // Generate panel
-                $panelResult = $this->generatePanel($processedCharacters, $description, $panelId, $panelOptions);
-
-                // Update strip state with panel info
-                $stripState = $this->stateManager->getStripState($stripId);
-                $stripState['panels'][$index] = [
-                    'id' => $panelId,
-                    'description' => $description,
-                    'status' => $panelResult['status']
-                ];
-                $this->stateManager->updateStripState($stripId, ['panels' => $stripState['panels']]);
-
-                if ($panelResult['status'] === StateManager::STATUS_PROCESSING) {
-                    $pendingPanels[] = $panelId;
-                }
-            }
+            $this->stateManager->updateStripState($stripId, $stripState);
 
             return [
-                'id' => $stripId,
-                'status' => empty($pendingPanels) ? StateManager::STATUS_COMPLETED : StateManager::STATUS_PROCESSING,
-                'pending_panels' => $pendingPanels,
-                'total_panels' => count($panelDescriptions)
+                'success' => true,
+                'data' => [
+                    'id' => $stripId,
+                    'status' => 'processing',
+                    'message' => 'Comic generation started'
+                ]
             ];
         } catch (Exception $e) {
-            $this->logger->error("Failed to generate comic strip", [
+            $this->logger->error('Comic generation failed', [
                 'error' => $e->getMessage()
             ]);
-            throw $e;
+
+            return [
+                'success' => false,
+                'error' => $e->getMessage()
+            ];
         }
     }
 

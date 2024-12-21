@@ -18,7 +18,10 @@ class CharacterProcessor
     {
         $this->logger = $logger;
         $this->config = Config::getInstance();
-        $this->replicateClient = new ReplicateClient($logger);
+        $this->replicateClient = new ReplicateClient(
+            $this->config->getApiToken(),
+            $logger
+        );
         $this->imageComposer = new ImageComposer($logger);
         $this->fileManager = FileManager::getInstance($logger);
     }
@@ -26,133 +29,104 @@ class CharacterProcessor
     /**
      * Process a batch of characters
      * @param array $characters Array of character data
-     * @param array $options Processing options
+     * @param string $stripId Strip ID
      * @return array Processed character data
      */
-    public function processCharacters(array $characters, array $options = []): array
+    public function processCharacters(array $characters, string $stripId): array
     {
-        $this->logger->info("Processing batch of characters", [
-            'count' => count($characters),
-            'options' => $options
-        ]);
+        $processedCharacters = [];
 
-        try {
-            $results = [];
-            foreach ($characters as $character) {
-                try {
-                    // Skip processing if already a Replicate URL
-                    if (strpos($character['image'], 'replicate.delivery') !== false) {
-                        $character['cartoonified_image'] = $character['image'];
-                        $character['status'] = 'completed';
-                        $results[$character['id']] = $character;
-                        continue;
-                    }
-
-                    // Prepare character-specific options
-                    $charOptions = array_merge(
-                        $options,
-                        $character['options'] ?? [],
-                        [
-                            'character_id' => $character['id'],
-                            'panel_index' => $options['panel_index'] ?? 0,
-                            'strip_id' => $options['strip_id'] ?? null
-                        ]
-                    );
-
-                    // Process the character image
-                    $result = $this->cartoonifyCharacter($character['image'], $charOptions);
-
-                    // Initialize character state
-                    $character['prediction_id'] = $result['id'];
-                    $character['status'] = 'processing';
-
-                    // If output is immediately available (rare case)
-                    if (isset($result['output'])) {
-                        $character['cartoonified_image'] = $result['output'];
-                        $character['status'] = 'completed';
-                    }
-
-                    $this->logger->info("Character processing initiated", [
-                        'character_id' => $character['id'],
-                        'prediction_id' => $result['id'],
-                        'status' => $character['status']
-                    ]);
-
-                    $results[$character['id']] = $character;
-                } catch (Exception $e) {
-                    $this->logger->error("Character processing failed", [
-                        'character_id' => $character['id'],
-                        'error' => $e->getMessage()
-                    ]);
-
-                    // Store error but continue with other characters
-                    $character['status'] = 'failed';
-                    $character['error'] = $e->getMessage();
-                    $results[$character['id']] = $character;
+        foreach ($characters as $character) {
+            try {
+                // Save character image
+                $imageData = $this->saveCharacterImage($character['image']);
+                if (!$imageData) {
+                    throw new Exception('Failed to save character image');
                 }
-            }
 
-            return $results;
-        } catch (Exception $e) {
-            $this->logger->error("Batch character processing failed", [
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
-            ]);
-            throw $e;
-        }
-    }
+                // Start cartoonification
+                $prediction = $this->startCartoonification($imageData['path'], $character['id']);
+                if (!$prediction || !isset($prediction['id'])) {
+                    throw new Exception('Failed to start cartoonification');
+                }
 
-    /**
-     * Convert a character image to cartoon style
-     * @param string $imageData Image data (URL, base64, or file path)
-     * @param array $options Processing options
-     * @return array Processing result
-     */
-    private function cartoonifyCharacter(string $imageData, array $options = []): array
-    {
-        $this->logger->info("Cartoonifying character", [
-            'image_length' => strlen($imageData),
-            'options' => $options
-        ]);
+                // Create pending file for webhook
+                $pendingData = [
+                    'strip_id' => $stripId,
+                    'options' => [
+                        'character_id' => $character['id']
+                    ]
+                ];
 
-        try {
-            // If image is already in public/generated, treat it as cartoonified
-            if (strpos($imageData, '/public/generated/') !== false) {
-                $this->logger->info("Using pre-cartoonified image", [
-                    'image_path' => $imageData
+                $this->createPendingFile($prediction['id'], $pendingData);
+
+                // Add to processed characters
+                $processedCharacters[$character['id']] = [
+                    'id' => $character['id'],
+                    'status' => 'processing',
+                    'prediction_id' => $prediction['id']
+                ];
+
+                $this->logger->info('Character processing started', [
+                    'character_id' => $character['id'],
+                    'prediction_id' => $prediction['id']
                 ]);
-                return [
-                    'status' => 'succeeded',
-                    'output' => $imageData,
-                    'id' => uniqid('local_'),
-                    'character_id' => $options['character_id'] ?? null
+            } catch (Exception $e) {
+                $this->logger->error('Character processing failed', [
+                    'character_id' => $character['id'],
+                    'error' => $e->getMessage()
+                ]);
+
+                $processedCharacters[$character['id']] = [
+                    'id' => $character['id'],
+                    'status' => 'failed',
+                    'error' => $e->getMessage()
                 ];
             }
+        }
 
-            // If image is a URL, download it first
-            if (filter_var($imageData, FILTER_VALIDATE_URL)) {
-                $imageData = $this->fileManager->saveImageFromUrl($imageData, 'character');
-            }
-            // If image is base64, save it to a file
-            elseif (strpos($imageData, 'data:image') === 0) {
-                $imageData = $this->fileManager->saveBase64Image($imageData, 'character');
-            }
+        return $processedCharacters;
+    }
 
-            // Call Replicate API to cartoonify
-            $result = $this->replicateClient->cartoonify($imageData, $options);
+    private function saveCharacterImage(string $base64Image): array
+    {
+        $imageData = base64_decode(preg_replace('#^data:image/\w+;base64,#i', '', $base64Image));
+        if (!$imageData) {
+            throw new Exception('Invalid image data');
+        }
 
-            $this->logger->info("Character cartoonified successfully", [
-                'result' => $result,
-                'character_id' => $options['character_id'] ?? null
-            ]);
+        $filename = uniqid('char_') . '.png';
+        $path = $this->config->getOutputPath() . $filename;
 
-            return $result;
-        } catch (Exception $e) {
-            $this->logger->error("Failed to cartoonify character", [
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
-            ]);
-            throw $e;
+        if (!file_put_contents($path, $imageData)) {
+            throw new Exception('Failed to save image');
+        }
+
+        return [
+            'path' => $path,
+            'filename' => $filename
+        ];
+    }
+
+    private function startCartoonification(string $imagePath, string $characterId): array
+    {
+        $this->logger->info('Starting cartoonification', [
+            'character_id' => $characterId,
+            'image_path' => $imagePath
+        ]);
+
+        return $this->replicateClient->createPrediction([
+            'image' => $imagePath,
+            'character_id' => $characterId
+        ]);
+    }
+
+    private function createPendingFile(string $predictionId, array $data): void
+    {
+        $pendingFile = $this->config->getTempPath() . "pending_{$predictionId}.json";
+
+        if (!file_put_contents($pendingFile, json_encode($data))) {
+            throw new Exception('Failed to create pending file');
         }
     }
 }

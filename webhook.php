@@ -28,92 +28,83 @@ class WebhookHandler
 
             $this->logger->info('Received webhook', ['payload' => $payload]);
 
-            // Get prediction ID from payload
+            // Get prediction ID and read pending file
             $predictionId = $payload['id'] ?? null;
             if (!$predictionId) {
-                throw new Exception('Missing prediction ID in webhook data');
+                throw new Exception('Missing prediction ID');
             }
 
-            // Read pending file data
-            $tempPath = $this->config->getTempPath();
-            $pendingFile = $tempPath . "pending_{$predictionId}.json";
-            if (file_exists($pendingFile)) {
-                $pendingData = json_decode(file_get_contents($pendingFile), true);
-                if ($pendingData) {
-                    $this->logger->info("Found pending file data", [
-                        'file' => $pendingFile,
-                        'data' => $pendingData
-                    ]);
-                }
+            $pendingFile = $this->config->getTempPath() . "pending_{$predictionId}.json";
+            if (!file_exists($pendingFile)) {
+                throw new Exception('Pending file not found');
             }
 
-            // Extract necessary information
-            $panelId = $pendingData['panel_id'] ?? null;
+            $pendingData = json_decode(file_get_contents($pendingFile), true);
+            if (!$pendingData) {
+                throw new Exception('Invalid pending data');
+            }
+
+            // Extract basic information
             $stripId = $pendingData['strip_id'] ?? null;
+            $characterId = $pendingData['options']['character_id'] ?? null;
             $status = $payload['status'] ?? null;
             $output = $payload['output'] ?? null;
-            $stage = $pendingData['stage'] ?? 'cartoonify';
 
-            if (!$panelId || !$stripId) {
-                $this->logger->error('Missing required data', [
-                    'panel_id' => $panelId,
-                    'strip_id' => $stripId,
-                    'pending_data' => $pendingData ?? null,
-                    'payload' => $payload
-                ]);
-                throw new Exception('Missing required webhook data');
+            if (!$stripId || !$characterId) {
+                throw new Exception('Missing required data');
             }
 
-            // Update panel state based on stage
-            $panelUpdate = [
-                'webhook_received_at' => time()
-            ];
+            // Update character state
+            $stripState = $this->stateManager->getStripState($stripId);
 
-            if ($stage === 'cartoonify') {
-                if ($status === 'succeeded') {
-                    $panelUpdate['status'] = StateManager::STATUS_PROCESSING;
-                    $panelUpdate['cartoonified_image'] = $output;
-                } else if ($status === 'failed') {
-                    $panelUpdate['status'] = StateManager::STATUS_FAILED;
-                    $panelUpdate['error'] = $payload['error'] ?? 'Cartoonification failed';
+            if (!isset($stripState['characters'])) {
+                $stripState['characters'] = [];
+            }
+
+            // Simple character state update
+            if ($status === 'succeeded' && $output) {
+                $stripState['characters'][$characterId] = [
+                    'id' => $characterId,
+                    'image_url' => $output,
+                    'status' => 'completed'
+                ];
+
+                // If all characters are complete, set the output path
+                $allComplete = count(array_filter(
+                    $stripState['characters'],
+                    fn($char) => $char['status'] === 'completed'
+                )) === count($stripState['characters']);
+
+                if ($allComplete) {
+                    $stripState['output_path'] = $output;
                 }
             } else {
-                $panelUpdate['status'] = $status === 'succeeded' ? StateManager::STATUS_COMPLETED : StateManager::STATUS_FAILED;
-                if ($output) {
-                    $panelUpdate['output_path'] = $output;
-                }
-                if ($status === 'failed') {
-                    $panelUpdate['error'] = $payload['error'] ?? 'Panel generation failed';
-                }
-            }
-
-            $this->stateManager->updatePanelState($panelId, $panelUpdate);
-
-            // Check if all panels are complete
-            $stripState = $this->stateManager->getStripState($stripId);
-            $allComplete = true;
-            $anyFailed = false;
-
-            foreach ($stripState['panels'] as $panel) {
-                if ($panel['status'] === 'failed') {
-                    $anyFailed = true;
-                    break;
-                }
-                if ($panel['status'] !== 'completed') {
-                    $allComplete = false;
-                }
-            }
-
-            // Update strip state accordingly
-            if ($anyFailed) {
-                $this->stateManager->updateStripState($stripId, [
+                $stripState['characters'][$characterId] = [
+                    'id' => $characterId,
                     'status' => 'failed',
-                    'error' => 'One or more panels failed to generate'
-                ]);
-            } elseif ($allComplete) {
-                $this->stateManager->updateStripState($stripId, [
-                    'status' => 'completed'
-                ]);
+                    'error' => $payload['error'] ?? 'Processing failed'
+                ];
+            }
+
+            // Update strip progress
+            $totalCharacters = count($stripState['characters']);
+            $completedCharacters = count(array_filter(
+                $stripState['characters'],
+                fn($char) => $char['status'] === 'completed'
+            ));
+
+            $stripState['progress'] = $totalCharacters > 0
+                ? round(($completedCharacters / $totalCharacters) * 100)
+                : 0;
+
+            $stripState['status'] = $completedCharacters === $totalCharacters
+                ? 'completed'
+                : 'processing';
+
+            // Save state and clean up
+            $this->stateManager->updateStripState($stripId, $stripState);
+            if (file_exists($pendingFile)) {
+                unlink($pendingFile);
             }
 
             http_response_code(200);
