@@ -63,18 +63,64 @@ class WebhookHandler
 
             // Simple character state update
             if ($status === 'succeeded' && $output) {
-                $stripState['characters'][$characterId] = [
-                    'id' => $characterId,
-                    'image_url' => $output,
-                    'status' => 'completed'
-                ];
+                $this->logger->info('Processing successful cartoonification', [
+                    'replicate_url' => $output,
+                    'character_id' => $characterId
+                ]);
 
-                // Save the cartoonified image locally
-                $outputPath = $this->config->getOutputPath() . '/' . basename($output);
-                file_put_contents($outputPath, file_get_contents($output));
+                // Generate unique filename for cartoonified image
+                $filename = 'cartoonified_' . basename($pendingData['image_path']);
+                $outputPath = $this->config->getOutputPath() . '/' . $filename;
 
-                // Update the character's image URL to use our local path
-                $stripState['characters'][$characterId]['image_url'] = rtrim($this->config->getBaseUrl(), '/') . '/generated/' . basename($output);
+                try {
+                    $imageContent = file_get_contents($output);
+                    if ($imageContent === false) {
+                        throw new Exception('Failed to download cartoonified image');
+                    }
+
+                    if (file_put_contents($outputPath, $imageContent) === false) {
+                        throw new Exception('Failed to save cartoonified image');
+                    }
+
+                    // Set proper permissions
+                    chmod($outputPath, 0644);
+                    if (function_exists('posix_getpwuid')) {
+                        chown($outputPath, 'www-data');
+                        chgrp($outputPath, 'www-data');
+                    }
+
+                    $this->logger->info('Saved cartoonified image', [
+                        'path' => $outputPath,
+                        'filename' => $filename,
+                        'size' => strlen($imageContent),
+                        'permissions' => substr(sprintf('%o', fileperms($outputPath)), -4),
+                        'owner' => function_exists('posix_getpwuid') ? posix_getpwuid(fileowner($outputPath))['name'] : 'unknown'
+                    ]);
+
+                    // Update character state with local URL
+                    $localUrl = rtrim($this->config->getBaseUrl(), '/') . '/generated/' . $filename;
+                    $stripState['characters'][$characterId] = [
+                        'id' => $characterId,
+                        'image_url' => $localUrl,
+                        'status' => 'completed'
+                    ];
+
+                    $this->logger->info('Updated character state', [
+                        'character_id' => $characterId,
+                        'image_url' => $localUrl
+                    ]);
+                } catch (Exception $e) {
+                    $this->logger->error('Failed to handle cartoonified image', [
+                        'error' => $e->getMessage(),
+                        'character_id' => $characterId
+                    ]);
+
+                    $stripState['characters'][$characterId] = [
+                        'id' => $characterId,
+                        'status' => 'failed',
+                        'error' => 'Failed to save cartoonified image: ' . $e->getMessage()
+                    ];
+                }
             } else {
                 $stripState['characters'][$characterId] = [
                     'id' => $characterId,

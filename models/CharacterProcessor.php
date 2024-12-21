@@ -98,6 +98,7 @@ class CharacterProcessor
         // Generate a unique filename
         $filename = 'generatedcharacter_' . uniqid() . '.png';
         $outputPath = $this->config->getOutputPath();
+        $generatedPath = basename($outputPath);
 
         // Ensure output directory exists and has correct permissions
         if (!is_dir($outputPath)) {
@@ -124,14 +125,14 @@ class CharacterProcessor
         $this->logger->info('Saved character image', [
             'path' => $path,
             'filename' => $filename,
-            'url' => rtrim($this->config->getBaseUrl(), '/') . '/generated/' . $filename,
+            'url' => rtrim($this->config->getBaseUrl(), '/') . '/' . $generatedPath . '/' . $filename,
             'permissions' => substr(sprintf('%o', fileperms($path)), -4)
         ]);
 
         return [
             'path' => $path,
             'filename' => $filename,
-            'url' => rtrim($this->config->getBaseUrl(), '/') . '/generated/' . $filename
+            'url' => rtrim($this->config->getBaseUrl(), '/') . '/' . $generatedPath . '/' . $filename
         ];
     }
 
@@ -143,10 +144,11 @@ class CharacterProcessor
         ]);
 
         // Get image URL from saved data
+        $generatedPath = basename($this->config->getOutputPath());
         $imageData = [
             'path' => $imagePath,
             'filename' => basename($imagePath),
-            'url' => rtrim($this->config->getBaseUrl(), '/') . '/generated/' . basename($imagePath)
+            'url' => rtrim($this->config->getBaseUrl(), '/') . '/' . $generatedPath . '/' . basename($imagePath)
         ];
 
         // Log the URL we're sending to Replicate

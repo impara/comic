@@ -177,14 +177,33 @@ class ComicController
             throw new RuntimeException("Character at index $index must have an image");
         }
 
+        // Get the generated path from config
+        $generatedPath = basename($this->config->getOutputPath());
+
         // Validate image format
-        if (
-            !preg_match('/^data:image\/(\w+);base64,/', $character['image'])
-            && !filter_var($character['image'], FILTER_VALIDATE_URL)
-            && strpos($character['image'], '/public/generated/') === false
-        ) {
+        $isBase64 = preg_match('/^data:image\/(\w+);base64,/', $character['image']);
+        $isUrl = filter_var($character['image'], FILTER_VALIDATE_URL);
+        $isGeneratedPath = strpos($character['image'], '/' . $generatedPath . '/') !== false;
+
+        if (!$isBase64 && !$isUrl && !$isGeneratedPath) {
+            $this->logger->error('Invalid character image format', [
+                'character_index' => $index,
+                'image_data' => substr($character['image'], 0, 100) . '...',
+                'is_base64' => $isBase64,
+                'is_url' => $isUrl,
+                'is_generated' => $isGeneratedPath,
+                'expected_path' => $generatedPath
+            ]);
             throw new RuntimeException("Character image at index $index must be base64 encoded, a valid URL, or a generated image path");
         }
+
+        // Log validation success
+        $this->logger->info('Character validation passed', [
+            'character_index' => $index,
+            'character_id' => $character['id'],
+            'image_type' => $isBase64 ? 'base64' : ($isUrl ? 'url' : 'generated'),
+            'generated_path' => $isGeneratedPath ? $generatedPath : null
+        ]);
     }
 
     /**
