@@ -116,7 +116,8 @@ class ReplicateClient
                     'stage' => 'cartoonify',
                     'created_at' => time(),
                     'options' => $options,
-                    'panel_id' => $originalPanelId
+                    'panel_id' => $originalPanelId,
+                    'strip_id' => $options['strip_id'] ?? null
                 ];
                 file_put_contents($pendingFile, json_encode($pendingData));
             }
