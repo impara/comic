@@ -40,6 +40,7 @@ class StateManager
      */
     public function initializePanel(string $stripId, string $panelId, string $description, array $options = []): array
     {
+        // Initialize panel state
         $state = [
             'id' => $panelId,
             'strip_id' => $stripId,
@@ -49,23 +50,61 @@ class StateManager
             'options' => $options
         ];
 
+        // Save panel state
         $this->savePanelState($panelId, $state);
+
+        // Update strip state to include this panel
+        $stripState = $this->getStripState($stripId);
+        if (!isset($stripState['panels'])) {
+            $stripState['panels'] = [];
+        }
+        $stripState['panels'][$panelId] = [
+            'id' => $panelId,
+            'description' => $description,
+            'status' => self::STATUS_INITIALIZING
+        ];
+        $this->saveStripState($stripId, $stripState);
+
+        $this->logger->info("Panel initialized", [
+            'panel_id' => $panelId,
+            'strip_id' => $stripId,
+            'status' => self::STATUS_INITIALIZING
+        ]);
+
         return $state;
     }
 
     /**
-     * Update strip state and recalculate progress
+     * Update strip state
      */
     public function updateStripState(string $stripId, array $update): array
     {
         $state = $this->getStripState($stripId);
+
+        // Handle panel updates separately to maintain structure
+        if (isset($update['panels'])) {
+            foreach ($update['panels'] as $panelId => $panelUpdate) {
+                if (!isset($state['panels'][$panelId])) {
+                    $state['panels'][$panelId] = [];
+                }
+                $state['panels'][$panelId] = array_merge($state['panels'][$panelId], $panelUpdate);
+            }
+            unset($update['panels']);
+        }
+
+        // Merge remaining updates
         $state = array_merge($state, $update, ['updated_at' => time()]);
         $this->saveStripState($stripId, $state);
 
-        // Recalculate progress if panels exist
+        // Recalculate progress
         if (!empty($state['panels'])) {
             $this->updateStripProgress($stripId);
         }
+
+        $this->logger->info("Strip state updated", [
+            'strip_id' => $stripId,
+            'state' => $state
+        ]);
 
         return $state;
     }

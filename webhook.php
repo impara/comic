@@ -40,19 +40,27 @@ class WebhookHandler
             if (file_exists($pendingFile)) {
                 $pendingData = json_decode(file_get_contents($pendingFile), true);
                 if ($pendingData) {
-                    // Merge pending data with payload
-                    $payload = array_merge($payload, $pendingData);
+                    $this->logger->info("Found pending file data", [
+                        'file' => $pendingFile,
+                        'data' => $pendingData
+                    ]);
                 }
             }
 
             // Extract necessary information
-            $panelId = $payload['panel_id'] ?? null;
-            $stripId = $payload['strip_id'] ?? null;
+            $panelId = $pendingData['panel_id'] ?? null;
+            $stripId = $pendingData['strip_id'] ?? null;
             $status = $payload['status'] ?? null;
             $output = $payload['output'] ?? null;
-            $stage = $payload['stage'] ?? null;
+            $stage = $pendingData['stage'] ?? 'cartoonify';
 
             if (!$panelId || !$stripId) {
+                $this->logger->error('Missing required data', [
+                    'panel_id' => $panelId,
+                    'strip_id' => $stripId,
+                    'pending_data' => $pendingData ?? null,
+                    'payload' => $payload
+                ]);
                 throw new Exception('Missing required webhook data');
             }
 
