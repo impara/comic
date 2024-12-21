@@ -61,10 +61,14 @@ class CharacterProcessor
                     // Process the character image
                     $result = $this->cartoonifyCharacter($character['image'], $charOptions);
 
-                    // Store cartoonified image URL in character data
-                    $character['cartoonified_image'] = $result['output'] ?? null;
-                    if (!$character['cartoonified_image']) {
-                        throw new Exception("Cartoonification failed - no output URL");
+                    // Store prediction ID and set status as processing
+                    $character['prediction_id'] = $result['id'];
+                    $character['status'] = 'processing';
+
+                    // If output URL is already available, use it
+                    if (isset($result['output'])) {
+                        $character['cartoonified_image'] = $result['output'];
+                        $character['status'] = 'completed';
                     }
 
                     $results[$character['id']] = $character;
@@ -73,7 +77,10 @@ class CharacterProcessor
                         'character_id' => $character['id'],
                         'error' => $e->getMessage()
                     ]);
-                    throw $e;
+                    // Store error but continue processing other characters
+                    $character['status'] = 'failed';
+                    $character['error'] = $e->getMessage();
+                    $results[$character['id']] = $character;
                 }
             }
 
