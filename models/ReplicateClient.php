@@ -111,12 +111,10 @@ class ReplicateClient
                 $tempPath = $this->config->getTempPath();
                 $pendingFile = $tempPath . "pending_{$result['id']}.json";
 
-                // Use character_id as panel_id if originalPanelId is not provided
-                $panelId = $originalPanelId ?? $options['character_id'] ?? null;
-
+                // Use character_id directly as panel_id
                 $pendingData = [
                     'prediction_id' => $result['id'],
-                    'panel_id' => $panelId,
+                    'panel_id' => $options['character_id'] ?? null,
                     'strip_id' => $options['strip_id'] ?? null,
                     'stage' => 'cartoonify',
                     'created_at' => time(),
