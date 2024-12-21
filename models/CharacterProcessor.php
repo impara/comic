@@ -95,12 +95,18 @@ class CharacterProcessor
             throw new Exception('Invalid image data');
         }
 
-        $filename = uniqid('char_') . '.png';
+        // Use character_ prefix to match existing files
+        $filename = 'character_' . uniqid() . '.png';
         $outputPath = $this->config->getOutputPath();
 
-        // Ensure output directory exists
+        // Ensure output directory exists and has correct permissions
         if (!is_dir($outputPath)) {
-            mkdir($outputPath, 0755, true);
+            if (!mkdir($outputPath, 0755, true)) {
+                throw new Exception('Failed to create output directory');
+            }
+            // Set www-data as owner
+            chown($outputPath, 'www-data');
+            chgrp($outputPath, 'www-data');
         }
 
         $path = $outputPath . $filename;
@@ -108,6 +114,19 @@ class CharacterProcessor
         if (!file_put_contents($path, $imageData)) {
             throw new Exception('Failed to save image');
         }
+
+        // Set proper permissions for the saved file
+        chmod($path, 0644);
+        chown($path, 'www-data');
+        chgrp($path, 'www-data');
+
+        // Log the file details
+        $this->logger->info('Saved character image', [
+            'path' => $path,
+            'filename' => $filename,
+            'url' => rtrim($this->config->getBaseUrl(), '/') . '/generated/' . $filename,
+            'permissions' => substr(sprintf('%o', fileperms($path)), -4)
+        ]);
 
         return [
             'path' => $path,
@@ -132,8 +151,21 @@ class CharacterProcessor
 
         // Log the URL we're sending to Replicate
         $this->logger->info('Using image URL for cartoonification', [
-            'url' => $imageData['url']
+            'url' => $imageData['url'],
+            'full_path' => $imagePath,
+            'exists' => file_exists($imagePath),
+            'permissions' => substr(sprintf('%o', fileperms($imagePath)), -4),
+            'owner' => posix_getpwuid(fileowner($imagePath))['name']
         ]);
+
+        // Verify file exists and is accessible
+        if (!file_exists($imagePath)) {
+            throw new Exception('Image file does not exist: ' . $imagePath);
+        }
+
+        if (!is_readable($imagePath)) {
+            throw new Exception('Image file is not readable: ' . $imagePath);
+        }
 
         return $this->replicateClient->createPrediction([
             'image' => $imageData['url'],
