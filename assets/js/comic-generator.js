@@ -33,7 +33,22 @@ export const ComicGenerator = {
                 })
             });
 
-            const result = await response.json();
+            // First check if response is ok
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error('Server error response:', errorText);
+                throw new Error(`Server error: ${response.status}`);
+            }
+
+            // Then try to parse JSON
+            let result;
+            try {
+                result = await response.json();
+            } catch (parseError) {
+                console.error('JSON parse error:', parseError);
+                throw new Error('Invalid response format from server');
+            }
+
             if (result.success) {
                 this.handleGenerationStart(result.data);
             } else {
@@ -42,7 +57,7 @@ export const ComicGenerator = {
             }
         } catch (error) {
             console.error('Comic generation error:', error);
-            this.handleGenerationError('Failed to connect to the server. Please try again.');
+            this.handleGenerationError(error.message || 'Failed to connect to the server. Please try again.');
         }
     },
 

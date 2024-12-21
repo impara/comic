@@ -25,33 +25,46 @@ class ComicController
     /**
      * Handle incoming API request
      */
-    public function handleRequest(): void
+    public function handleRequest(): array
     {
-        // Get request body
-        $input = json_decode(file_get_contents('php://input'), true);
-
-        if (!$input) {
-            http_response_code(400);
-            echo json_encode([
-                'success' => false,
-                'error' => 'Invalid request body'
-            ]);
-            return;
-        }
-
         try {
+            // Get request body
+            $input = json_decode(file_get_contents('php://input'), true);
+
+            if (!$input) {
+                throw new Exception('Invalid request body');
+            }
+
+            // Validate required fields
+            if (empty($input['story'])) {
+                throw new Exception('Story is required');
+            }
+            if (empty($input['characters'])) {
+                throw new Exception('At least one character is required');
+            }
+            if (empty($input['style'])) {
+                throw new Exception('Style is required');
+            }
+            if (empty($input['background'])) {
+                throw new Exception('Background is required');
+            }
+
             $result = $this->handleGenerateRequest($input);
-            echo json_encode($result);
+
+            return [
+                'success' => true,
+                'data' => $result
+            ];
         } catch (Exception $e) {
             $this->logger->error('Request handling failed', [
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
             ]);
 
-            http_response_code(500);
-            echo json_encode([
+            return [
                 'success' => false,
                 'error' => $e->getMessage()
-            ]);
+            ];
         }
     }
 

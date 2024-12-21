@@ -77,7 +77,7 @@ class StateManager
     /**
      * Update strip state
      */
-    public function updateStripState(string $stripId, array $update): array
+    public function updateStripState(string $stripId, array $update, bool $skipProgressUpdate = false): array
     {
         $state = $this->getStripState($stripId);
 
@@ -94,17 +94,22 @@ class StateManager
 
         // Merge remaining updates
         $state = array_merge($state, $update, ['updated_at' => time()]);
+
+        // Save state first
         $this->saveStripState($stripId, $state);
 
-        // Recalculate progress
-        if (!empty($state['panels'])) {
-            $this->updateStripProgress($stripId);
-        }
+        // Update progress only if not skipped and panels exist
+        if (!$skipProgressUpdate && !empty($state['panels'])) {
+            $totalPanels = count($state['panels']);
+            $completedPanels = count(array_filter($state['panels'], function ($panel) {
+                return $panel['status'] === self::STATUS_COMPLETED;
+            }));
 
-        $this->logger->info("Strip state updated", [
-            'strip_id' => $stripId,
-            'state' => $state
-        ]);
+            $progress = ($completedPanels / $totalPanels) * 100;
+
+            // Update progress without triggering another progress update
+            $this->updateStripState($stripId, ['progress' => round($progress, 2)], true);
+        }
 
         return $state;
     }
@@ -120,7 +125,7 @@ class StateManager
 
         // Update strip progress if strip_id exists
         if (isset($state['strip_id'])) {
-            $this->updateStripProgress($state['strip_id']);
+            $this->updateStripState($state['strip_id'], [], false);
         }
 
         return $state;
@@ -145,32 +150,20 @@ class StateManager
     }
 
     /**
-     * Update strip progress based on panel states
-     */
-    private function updateStripProgress(string $stripId): void
-    {
-        $state = $this->getStripState($stripId);
-        if (empty($state['panels'])) {
-            return;
-        }
-
-        $totalPanels = count($state['panels']);
-        $completedPanels = count(array_filter($state['panels'], function ($panel) {
-            return $panel['status'] === self::STATUS_COMPLETED;
-        }));
-
-        $progress = ($completedPanels / $totalPanels) * 100;
-        $this->updateStripState($stripId, ['progress' => round($progress, 2)]);
-    }
-
-    /**
      * Save strip state to file
      */
     private function saveStripState(string $stripId, array $state): void
     {
         $path = $this->getStripStatePath($stripId);
         file_put_contents($path, json_encode($state));
-        $this->logger->info("Strip state updated", ['strip_id' => $stripId, 'status' => $state['status']]);
+
+        // Only log if status is present to avoid excessive logging
+        if (isset($state['status'])) {
+            $this->logger->info("Strip state updated", [
+                'strip_id' => $stripId,
+                'status' => $state['status']
+            ]);
+        }
     }
 
     /**

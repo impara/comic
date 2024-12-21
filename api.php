@@ -11,17 +11,17 @@ require_once __DIR__ . '/models/ComicGenerator.php';
 require_once __DIR__ . '/controllers/ComicController.php';
 
 try {
-    // Initialize configuration
-    $config = Config::getInstance();
+    // Initialize dependencies
     $logger = new Logger();
+    $config = Config::getInstance();
 
-    // Initialize dependencies for ComicController
-    $imageComposer = new ImageComposer($logger, $config);
-    $characterProcessor = new CharacterProcessor($logger, $config);
+    // Initialize StateManager with correct parameters
+    $tempPath = $config->getTempPath();
+    $stateManager = new StateManager($tempPath, $logger);
+
+    $imageComposer = new ImageComposer($logger);
+    $characterProcessor = new CharacterProcessor($logger);
     $storyParser = new StoryParser($logger);
-    $stateManager = new StateManager($config->getTempPath(), $logger);
-
-    // Initialize ComicGenerator with its dependencies
     $comicGenerator = new ComicGenerator(
         $stateManager,
         $logger,
@@ -46,35 +46,48 @@ try {
         exit();
     }
 
+    // Validate request method
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        throw new Exception('Only POST method is allowed');
+    }
+
+    // Get and validate input
+    $input = json_decode(file_get_contents('php://input'), true);
+    if (!$input) {
+        throw new Exception('Invalid JSON input');
+    }
+
     // Create required directories with proper permissions
     $outputPath = $config->getOutputPath();
     if (!file_exists($outputPath)) {
-        mkdir($outputPath, 0755, true);
-        if (IS_PRODUCTION && function_exists('posix_getuid') && posix_getuid() === 0) {
-            chown($outputPath, 'www-data');
-            chgrp($outputPath, 'www-data');
+        if (!mkdir($outputPath, 0755, true)) {
+            throw new Exception('Failed to create output directory');
         }
     }
 
     // Handle the request
-    $controller->handleRequest();
-} catch (Throwable $e) {
-    error_log(sprintf(
-        "API Error: %s in %s on line %d\nStack trace:\n%s",
-        $e->getMessage(),
-        $e->getFile(),
-        $e->getLine(),
-        $e->getTraceAsString()
-    ));
+    $result = $controller->handleRequest();
 
-    http_response_code(500);
+    // Ensure proper JSON response
+    if (!headers_sent()) {
+        header('Content-Type: application/json');
+    }
+    echo json_encode($result);
+} catch (Throwable $e) {
+    $logger->error('API Error', [
+        'error' => $e->getMessage(),
+        'file' => $e->getFile(),
+        'line' => $e->getLine(),
+        'trace' => $e->getTraceAsString()
+    ]);
+
+    if (!headers_sent()) {
+        http_response_code(500);
+        header('Content-Type: application/json');
+    }
+
     echo json_encode([
-        'error' => 'Internal Server Error',
-        'message' => IS_PRODUCTION ? 'An unexpected error occurred' : $e->getMessage(),
-        'debug' => IS_PRODUCTION ? null : [
-            'file' => $e->getFile(),
-            'line' => $e->getLine(),
-            'trace' => $e->getTraceAsString()
-        ]
+        'success' => false,
+        'error' => $e->getMessage()
     ]);
 }
