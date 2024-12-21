@@ -98,7 +98,8 @@ class WebhookHandler
                     ]);
 
                     // Update character state with local URL
-                    $localUrl = rtrim($this->config->getBaseUrl(), '/') . '/generated/' . $filename;
+                    $generatedPath = basename($this->config->getOutputPath());
+                    $localUrl = rtrim($this->config->getBaseUrl(), '/') . '/' . $generatedPath . '/' . $filename;
                     $stripState['characters'][$characterId] = [
                         'id' => $characterId,
                         'image_url' => $localUrl,
