@@ -95,7 +95,7 @@ class CharacterProcessor
             throw new Exception('Invalid image data');
         }
 
-        // Use character_ prefix to match existing files
+        // Generate a unique filename
         $filename = 'generatedcharacter_' . uniqid() . '.png';
         $outputPath = $this->config->getOutputPath();
 
@@ -109,7 +109,7 @@ class CharacterProcessor
             chgrp($outputPath, 'www-data');
         }
 
-        $path = $outputPath . $filename;
+        $path = $outputPath . '/' . $filename;  // Add forward slash to properly join path
 
         if (!file_put_contents($path, $imageData)) {
             throw new Exception('Failed to save image');
