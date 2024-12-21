@@ -112,7 +112,7 @@ export const ComicGenerator = {
         if (!this.stripId) return;
 
         try {
-            const response = await fetch(`/api/status/${this.stripId}`);
+            const response = await fetch(`/api.php?action=status&id=${this.stripId}`);
             const state = await response.json();
 
             if (!state || typeof state !== 'object') {

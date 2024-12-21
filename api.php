@@ -14,29 +14,11 @@ try {
     // Initialize dependencies
     $logger = new Logger();
     $config = Config::getInstance();
-
-    // Initialize StateManager with correct parameters
-    $tempPath = $config->getTempPath();
-    $stateManager = new StateManager($tempPath, $logger);
-
-    $imageComposer = new ImageComposer($logger);
-    $characterProcessor = new CharacterProcessor($logger);
-    $storyParser = new StoryParser($logger);
-    $comicGenerator = new ComicGenerator(
-        $stateManager,
-        $logger,
-        $config,
-        $imageComposer,
-        $characterProcessor,
-        $storyParser
-    );
-
-    // Initialize controller with dependencies
-    $controller = new ComicController($logger, $config, $comicGenerator);
+    $stateManager = new StateManager($config->getTempPath(), $logger);
 
     // Enable CORS for development
     header('Access-Control-Allow-Origin: *');
-    header('Access-Control-Allow-Methods: POST');
+    header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
     header('Access-Control-Allow-Headers: Content-Type');
     header('Content-Type: application/json');
 
@@ -46,33 +28,62 @@ try {
         exit();
     }
 
-    // Validate request method
-    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-        throw new Exception('Only POST method is allowed');
-    }
-
-    // Get and validate input
-    $input = json_decode(file_get_contents('php://input'), true);
-    if (!$input) {
-        throw new Exception('Invalid JSON input');
-    }
-
-    // Create required directories with proper permissions
-    $outputPath = $config->getOutputPath();
-    if (!file_exists($outputPath)) {
-        if (!mkdir($outputPath, 0755, true)) {
-            throw new Exception('Failed to create output directory');
+    // Handle status requests
+    if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['action'] === 'status') {
+        if (!isset($_GET['id'])) {
+            throw new Exception('Strip ID is required');
         }
+
+        $stripId = $_GET['id'];
+        $state = $stateManager->getStripState($stripId);
+        if (empty($state)) {
+            throw new Exception('Strip not found');
+        }
+
+        echo json_encode($state);
+        exit();
     }
 
-    // Handle the request
-    $result = $controller->handleRequest();
+    // Handle comic generation requests
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        $imageComposer = new ImageComposer($logger);
+        $characterProcessor = new CharacterProcessor($logger);
+        $storyParser = new StoryParser($logger);
+        $comicGenerator = new ComicGenerator(
+            $stateManager,
+            $logger,
+            $config,
+            $imageComposer,
+            $characterProcessor,
+            $storyParser
+        );
 
-    // Ensure proper JSON response
-    if (!headers_sent()) {
-        header('Content-Type: application/json');
+        // Initialize controller with dependencies
+        $controller = new ComicController($logger, $config, $comicGenerator);
+
+        // Get and validate input
+        $input = json_decode(file_get_contents('php://input'), true);
+        if (!$input) {
+            throw new Exception('Invalid JSON input');
+        }
+
+        // Create required directories with proper permissions
+        $outputPath = $config->getOutputPath();
+        if (!file_exists($outputPath)) {
+            if (!mkdir($outputPath, 0755, true)) {
+                throw new Exception('Failed to create output directory');
+            }
+        }
+
+        // Handle the request
+        $result = $controller->handleRequest();
+
+        // Return result
+        echo json_encode($result);
+        exit();
     }
-    echo json_encode($result);
+
+    throw new Exception('Invalid request method or action');
 } catch (Throwable $e) {
     $logger->error('API Error', [
         'error' => $e->getMessage(),

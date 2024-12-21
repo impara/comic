@@ -69,15 +69,12 @@ class WebhookHandler
                     'status' => 'completed'
                 ];
 
-                // If all characters are complete, set the output path
-                $allComplete = count(array_filter(
-                    $stripState['characters'],
-                    fn($char) => $char['status'] === 'completed'
-                )) === count($stripState['characters']);
+                // Save the cartoonified image locally
+                $outputPath = $this->config->getOutputPath() . '/' . basename($output);
+                file_put_contents($outputPath, file_get_contents($output));
 
-                if ($allComplete) {
-                    $stripState['output_path'] = $output;
-                }
+                // Update the character's image URL to use our local path
+                $stripState['characters'][$characterId]['image_url'] = rtrim($this->config->getBaseUrl(), '/') . '/generated/' . basename($output);
             } else {
                 $stripState['characters'][$characterId] = [
                     'id' => $characterId,
@@ -97,9 +94,25 @@ class WebhookHandler
                 ? round(($completedCharacters / $totalCharacters) * 100)
                 : 0;
 
-            $stripState['status'] = $completedCharacters === $totalCharacters
-                ? 'completed'
-                : 'processing';
+            // Update strip status
+            $allComplete = $completedCharacters === $totalCharacters;
+            $anyFailed = count(array_filter(
+                $stripState['characters'],
+                fn($char) => $char['status'] === 'failed'
+            )) > 0;
+
+            if ($allComplete) {
+                $stripState['status'] = 'completed';
+                // Set the output path to the last completed character's image
+                $lastCompleted = array_filter($stripState['characters'], fn($char) => $char['status'] === 'completed');
+                $lastChar = end($lastCompleted);
+                $stripState['output_path'] = $lastChar['image_url'];
+            } elseif ($anyFailed) {
+                $stripState['status'] = 'failed';
+                $stripState['error'] = 'One or more characters failed to process';
+            } else {
+                $stripState['status'] = 'processing';
+            }
 
             // Save state and clean up
             $this->stateManager->updateStripState($stripId, $stripState);
