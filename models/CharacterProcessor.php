@@ -53,7 +53,8 @@ class CharacterProcessor
                         $character['options'] ?? [],
                         [
                             'character_id' => $character['id'],
-                            'panel_index' => $options['panel_index'] ?? 0
+                            'panel_index' => $options['panel_index'] ?? 0,
+                            'strip_id' => $options['strip_id'] ?? null
                         ]
                     );
 

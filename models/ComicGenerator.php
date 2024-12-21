@@ -50,7 +50,9 @@ class ComicGenerator
             $state = $this->stateManager->initializeStrip($stripId, $options);
 
             // Process characters
-            $processedCharacters = $this->characterProcessor->processCharacters($characters, $options);
+            $processedCharacters = $this->characterProcessor->processCharacters($characters, array_merge($options, [
+                'strip_id' => $stripId
+            ]));
             $this->stateManager->updateStripState($stripId, ['characters' => $processedCharacters]);
 
             // Segment story into panels
