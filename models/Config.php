@@ -229,7 +229,7 @@ class Config
             'replicate' => [
                 'models' => [
                     'cartoonify' => [
-                        'version' => '3b5c0222e7c4e9444fc1544883c85f0cae6fc1021d32514e6a4e7b4ff4a0b885',
+                        'version' => 'f109015d60170dfb20460f17da8cb863155823c85ece1115e1e9e4ec7ef51d3b',
                         'params' => [
                             'num_inference_steps' => 50,
                             'guidance_scale' => 7.5

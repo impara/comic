@@ -96,7 +96,14 @@ class CharacterProcessor
         }
 
         $filename = uniqid('char_') . '.png';
-        $path = $this->config->getOutputPath() . $filename;
+        $outputPath = $this->config->getOutputPath();
+
+        // Ensure output directory exists
+        if (!is_dir($outputPath)) {
+            mkdir($outputPath, 0755, true);
+        }
+
+        $path = $outputPath . $filename;
 
         if (!file_put_contents($path, $imageData)) {
             throw new Exception('Failed to save image');
@@ -104,7 +111,8 @@ class CharacterProcessor
 
         return [
             'path' => $path,
-            'filename' => $filename
+            'filename' => $filename,
+            'url' => rtrim($this->config->getBaseUrl(), '/') . '/generated/' . $filename
         ];
     }
 
@@ -115,12 +123,20 @@ class CharacterProcessor
             'image_path' => $imagePath
         ]);
 
-        // Convert local file path to public URL
-        $publicPath = str_replace($this->config->getOutputPath(), '', $imagePath);
-        $imageUrl = rtrim($this->config->getBaseUrl(), '/') . '/public/generated/' . ltrim($publicPath, '/');
+        // Get image URL from saved data
+        $imageData = [
+            'path' => $imagePath,
+            'filename' => basename($imagePath),
+            'url' => rtrim($this->config->getBaseUrl(), '/') . '/generated/' . basename($imagePath)
+        ];
+
+        // Log the URL we're sending to Replicate
+        $this->logger->info('Using image URL for cartoonification', [
+            'url' => $imageData['url']
+        ]);
 
         return $this->replicateClient->createPrediction([
-            'image' => $imageUrl,
+            'image' => $imageData['url'],
             'character_id' => $characterId
         ]);
     }
