@@ -217,4 +217,34 @@ class Config
         // Default to INFO if not set
         return $this->get('log_level', 'INFO');
     }
+
+    private function getDefaultConfig(): array
+    {
+        return [
+            'debug' => true,
+            'log_level' => 'debug',
+            'base_url' => 'https://comic.amertech.online',
+            'output_path' => __DIR__ . '/../public/generated/',
+            'temp_path' => __DIR__ . '/../temp/',
+            'replicate' => [
+                'models' => [
+                    'cartoonify' => [
+                        'version' => '3b5c0222e7c4e9444fc1544883c85f0cae6fc1021d32514e6a4e7b4ff4a0b885',
+                        'params' => [
+                            'num_inference_steps' => 50,
+                            'guidance_scale' => 7.5
+                        ]
+                    ],
+                    'nlp' => [
+                        'version' => 'f4e2de70d66816a838a89eeeb621910adffb0dd0baba3976c96980970978018d',
+                        'params' => [
+                            'temperature' => 0.75,
+                            'top_p' => 0.9,
+                            'max_length' => 2048
+                        ]
+                    ]
+                ]
+            ]
+        ];
+    }
 }

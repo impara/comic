@@ -22,13 +22,23 @@ class ReplicateClient
     {
         $this->logger->info('Creating prediction', ['input' => $input]);
 
+        // Get model version from config
+        $modelConfig = $this->config->get('replicate.models.cartoonify');
+        if (!$modelConfig || !isset($modelConfig['version'])) {
+            throw new Exception('Cartoonify model version not configured');
+        }
+
+        // Get webhook URL from config
+        $webhookUrl = $this->config->getBaseUrl() . '/webhook.php';
+
         $response = $this->post([
-            'version' => getenv('REPLICATE_MODEL_VERSION'),
+            'version' => $modelConfig['version'],
             'input' => [
                 'image' => $input['image'],
                 'character_id' => $input['character_id']
             ],
-            'webhook' => getenv('WEBHOOK_URL')
+            'webhook' => $webhookUrl,
+            'webhook_events_filter' => ['completed']
         ]);
 
         if (!isset($response['id'])) {

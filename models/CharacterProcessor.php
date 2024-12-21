@@ -115,8 +115,12 @@ class CharacterProcessor
             'image_path' => $imagePath
         ]);
 
+        // Convert local file path to public URL
+        $publicPath = str_replace($this->config->getOutputPath(), '', $imagePath);
+        $imageUrl = rtrim($this->config->getBaseUrl(), '/') . '/public/generated/' . ltrim($publicPath, '/');
+
         return $this->replicateClient->createPrediction([
-            'image' => $imagePath,
+            'image' => $imageUrl,
             'character_id' => $characterId
         ]);
     }
