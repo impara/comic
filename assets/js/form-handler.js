@@ -114,7 +114,6 @@ const FormHandler = {
                     isCustom: char.isCustom,
                     options: {
                         style: selectedStyle,
-                        // Add any character-specific options here
                         position: char.position || 'center',
                         scale: char.scale || 1.0
                     }
@@ -141,10 +140,11 @@ const FormHandler = {
 
             // Enhanced logging
             console.log('Comic generation data:', {
-                characters: formData.characters.length,
-                storyLength: formData.story.length,
-                style: formData.style,
-                background: formData.background
+                characters: characters.length,  // Log the actual array length
+                storyLength: userStory.length,
+                style: selectedStyle,
+                background: selectedBackground,
+                characterData: characterData  // Log the full character data for debugging
             });
 
             // Initialize ComicGenerator if not already initialized
