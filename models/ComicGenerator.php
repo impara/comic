@@ -37,13 +37,14 @@ class ComicGenerator
     /**
      * Generate a complete comic strip from a story
      */
-    public function generateComicStrip(array $characters, array $options = []): array
+    public function generateComicStrip(string $story, array $characters, array $options = []): array
     {
         try {
             // Initialize strip ID and state
             $stripId = uniqid('strip_');
             $this->logger->info('Starting comic generation', [
                 'strip_id' => $stripId,
+                'story_length' => strlen($story),
                 'character_count' => count($characters)
             ]);
 
@@ -55,6 +56,7 @@ class ComicGenerator
                 'id' => $stripId,
                 'status' => 'processing',
                 'characters' => $processedCharacters,
+                'story' => $story,
                 'progress' => 0,
                 'created_at' => time()
             ];

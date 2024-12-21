@@ -15,11 +15,14 @@ class StoryParser implements StoryParserInterface
     private const PANEL_COUNT = 4;
     private const CACHE_DURATION = 3600; // 1 hour cache for NLP results
 
-    public function __construct(LoggerInterface $logger = null)
+    public function __construct(LoggerInterface $logger)
     {
-        $this->logger = $logger ?? new Logger();
+        $this->logger = $logger;
         $this->config = Config::getInstance();
-        $this->replicateClient = new ReplicateClient($this->logger);
+        $this->replicateClient = new ReplicateClient(
+            $this->config->getApiToken(),
+            $logger
+        );
 
         // Initialize cache manager
         $cachePath = $this->config->getTempPath() . '/nlp_cache';
