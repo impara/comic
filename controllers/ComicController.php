@@ -12,7 +12,7 @@ class ComicController
 
     // Valid styles and backgrounds
     private const VALID_STYLES = ['manga', 'comic', 'european', 'modern'];
-    private const VALID_BACKGROUNDS = ['simple', 'detailed', 'atmospheric'];
+    private const VALID_BACKGROUNDS = ['city', 'nature', 'space', 'fantasy'];
     private const PANEL_COUNT = 4;
 
     public function __construct(Logger $logger, Config $config, ComicGenerator $comicGenerator)
@@ -189,7 +189,12 @@ class ComicController
                 'color_palette' => $input['style_params']['color_palette'] ?? 'vibrant',
                 'consistency_params' => [
                     'character_scale' => 1.0,
-                    'background_detail' => $input['background'] === 'detailed' ? 'high' : 'medium',
+                    'background_detail' => match ($input['background']) {
+                        'city' => 'high',
+                        'nature' => 'high',
+                        'space' => 'medium',
+                        'fantasy' => 'high'
+                    },
                     'lighting_scheme' => 'neutral'
                 ]
             ],

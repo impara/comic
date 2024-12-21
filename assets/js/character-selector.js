@@ -15,37 +15,82 @@ class CharacterSelector {
         const characterId = characterOption.data('character-id');
         const isSelected = characterOption.hasClass('selected');
 
-        // Toggle selection
-        if (isSelected) {
-            characterOption.removeClass('selected');
-            this.selectedCharacters = this.selectedCharacters.filter(id => id !== characterId);
-        } else {
-            // Check if we've reached the maximum
-            if (this.selectedCharacters.length >= this.maxCharacters) {
-                alert(`You can only select up to ${this.maxCharacters} characters.`);
-                return;
-            }
-            characterOption.addClass('selected');
-            this.selectedCharacters.push(characterId);
-        }
-
-        // Clean up character data in session storage
-        const characterData = JSON.parse(sessionStorage.getItem('characterData') || '{}');
-        const cleanedData = {};
-
-        // Only keep selected characters
-        this.selectedCharacters.forEach(id => {
-            if (characterData[id]) {
-                cleanedData[id] = characterData[id];
-            }
+        console.log('Character selection attempted:', {
+            characterId,
+            isSelected,
+            currentSelected: this.selectedCharacters
         });
 
-        // Update session storage
-        sessionStorage.setItem('selectedCharacters', JSON.stringify(this.selectedCharacters));
-        sessionStorage.setItem('characterData', JSON.stringify(cleanedData));
+        try {
+            if (isSelected) {
+                characterOption.removeClass('selected');
+                this.selectedCharacters = this.selectedCharacters.filter(id => id !== characterId);
+                console.log('Character deselected:', {
+                    characterId,
+                    remainingSelected: this.selectedCharacters
+                });
+            } else {
+                // Check if we've reached the maximum
+                if (this.selectedCharacters.length >= this.maxCharacters) {
+                    alert(`You can only select up to ${this.maxCharacters} characters.`);
+                    return;
+                }
 
-        // Update UI
-        this.updateCharacterCount();
+                characterOption.addClass('selected');
+                this.selectedCharacters.push(characterId);
+                console.log('Character selected:', {
+                    characterId,
+                    allSelected: this.selectedCharacters
+                });
+            }
+
+            // Clean up character data in session storage
+            const characterData = JSON.parse(sessionStorage.getItem('characterData') || '{}');
+            const cleanedData = {};
+
+            // Only keep selected characters
+            this.selectedCharacters.forEach(id => {
+                if (characterData[id]) {
+                    cleanedData[id] = characterData[id];
+                }
+            });
+
+            // Update session storage
+            sessionStorage.setItem('selectedCharacters', JSON.stringify(this.selectedCharacters));
+            sessionStorage.setItem('characterData', JSON.stringify(cleanedData));
+
+            // Update UI
+            this.updateCharacterCount();
+            this.updateCharacterUI(characterId, !isSelected);
+
+            // Dispatch event for form handler
+            document.dispatchEvent(new CustomEvent('characterSelectionChanged', {
+                detail: {
+                    selectedCharacters: this.selectedCharacters,
+                    characterData: cleanedData
+                }
+            }));
+
+        } catch (error) {
+            console.error('Error handling character selection:', error);
+            alert('An error occurred while selecting the character. Please try again.');
+        }
+    }
+
+    updateCharacterUI(characterId, isSelected) {
+        const $characterOption = $(`.character-option[data-character-id="${characterId}"]`);
+
+        if (isSelected) {
+            $characterOption.addClass('selected');
+        } else {
+            $characterOption.removeClass('selected');
+        }
+
+        // Update custom character tag if it exists
+        const $customCharacterTag = $(`.custom-character-tag[data-character-id="${characterId}"]`);
+        if ($customCharacterTag.length) {
+            $customCharacterTag.toggleClass('selected', isSelected);
+        }
     }
 
     updateCharacterCount() {

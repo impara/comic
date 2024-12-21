@@ -63,9 +63,6 @@ const FormHandler = {
         // Background selection
         $(document).on('click', '.background-option', (e) => this.handleBackgroundSelection(e));
 
-        // Character selection
-        $(document).on('click', '.character-option', (e) => this.handleCharacterSelection(e));
-
         // Character upload
         $('#uploadCharacter').on('click', (e) => this.handleCharacterUpload(e));
         $('#characterImage').on('change', (e) => this.handleCharacterImagePreview(e));
@@ -162,6 +159,9 @@ const FormHandler = {
                 metadata: formData.metadata
             });
         });
+
+        // Initialize character selection handlers
+        this.initializeCharacterSelectionHandlers();
     },
 
     initializeCharacterGrid() {
@@ -496,35 +496,6 @@ const FormHandler = {
         this.updateLivePreview();
     },
 
-    handleCharacterSelection(e) {
-        e.preventDefault();
-        e.stopPropagation();
-        const $target = $(e.currentTarget);
-        const characterId = $target.data('character-id');
-
-        if (!characterId) return;
-
-        // Toggle selection
-        if ($target.hasClass('selected')) {
-            this.selectedCharacters = this.selectedCharacters.filter(id => id !== characterId);
-            $target.removeClass('selected');
-            $(`.custom-character-tag[data-character-id="${characterId}"]`).removeClass('selected');
-        } else if (this.selectedCharacters.length < this.maxCharacters) {
-            this.selectedCharacters.push(characterId);
-            $target.addClass('selected');
-            $(`.custom-character-tag[data-character-id="${characterId}"]`).addClass('selected');
-        } else {
-            this.showErrorMessage(`Maximum ${this.maxCharacters} characters allowed`);
-            return;
-        }
-
-        // Store selected characters in session
-        sessionStorage.setItem('selectedCharacters', JSON.stringify(this.selectedCharacters));
-
-        // Update preview immediately
-        this.updateLivePreview();
-    },
-
     updateCharacterPreview() {
         const characterData = JSON.parse(sessionStorage.getItem('characterData') || '{}');
         const characterPreviewGrid = $('#characterPreviewGrid').empty();
@@ -764,8 +735,11 @@ const FormHandler = {
                 characterPreviewGrid.append(`
                     <div class="col-4">
                         <div class="character-preview-item">
-                            <img src="${char.image}" class="img-fluid rounded mb-2" alt="${char.name}">
-                            <div class="text-center">${char.name}</div>
+                            <img src="${char.image}" 
+                                 class="img-fluid rounded mb-2" 
+                                 alt="${char.name}"
+                                 style="max-height: 150px; width: 100%; object-fit: cover;">
+                            <div class="text-center small">${char.name}</div>
                         </div>
                     </div>
                 `);

@@ -24,44 +24,26 @@ class CharacterProcessor
     }
 
     /**
-     * Process multiple characters in a batch for a single panel
+     * Process a batch of characters
      * @param array $characters Array of character data
-     * @param array $options Panel-specific options
-     * @return array Array of processed character data
+     * @param array $options Processing options
+     * @return array Processed character data
      */
     public function processCharacters(array $characters, array $options = []): array
     {
-        $this->logger->info("Processing characters for panel", [
-            'character_count' => count($characters),
+        $this->logger->info("Processing batch of characters", [
+            'count' => count($characters),
             'options' => $options
         ]);
 
         try {
-            // Validate input
-            if (empty($characters)) {
-                throw new Exception("At least one character is required");
-            }
-
-            // Process all characters in a batch
             $results = [];
             foreach ($characters as $character) {
                 try {
-                    if (!isset($character['image'])) {
-                        throw new Exception("Character image is required");
-                    }
-
-                    if (!isset($character['id'])) {
-                        throw new Exception("Character ID is required");
-                    }
-
                     // Skip processing if already a Replicate URL
                     if (strpos($character['image'], 'replicate.delivery') !== false) {
-                        $results[$character['id']] = [
-                            'id' => $character['id'],
-                            'output' => $character['image'],
-                            'status' => 'succeeded',
-                            'character_id' => $character['id']
-                        ];
+                        $character['cartoonified_image'] = $character['image'];
+                        $results[$character['id']] = $character;
                         continue;
                     }
 
@@ -77,18 +59,20 @@ class CharacterProcessor
 
                     // Process the character image
                     $result = $this->cartoonifyCharacter($character['image'], $charOptions);
-                    $result['character_id'] = $character['id'];
-                    $results[$character['id']] = $result;
+
+                    // Store cartoonified image URL in character data
+                    $character['cartoonified_image'] = $result['output'] ?? null;
+                    if (!$character['cartoonified_image']) {
+                        throw new Exception("Cartoonification failed - no output URL");
+                    }
+
+                    $results[$character['id']] = $character;
                 } catch (Exception $e) {
                     $this->logger->error("Character processing failed", [
                         'character_id' => $character['id'],
                         'error' => $e->getMessage()
                     ]);
-                    $results[$character['id']] = [
-                        'id' => $character['id'],
-                        'status' => 'failed',
-                        'error' => $e->getMessage()
-                    ];
+                    throw $e;
                 }
             }
 
@@ -116,6 +100,19 @@ class CharacterProcessor
         ]);
 
         try {
+            // If image is already in public/generated, treat it as cartoonified
+            if (strpos($imageData, '/public/generated/') !== false) {
+                $this->logger->info("Using pre-cartoonified image", [
+                    'image_path' => $imageData
+                ]);
+                return [
+                    'status' => 'succeeded',
+                    'output' => $imageData,
+                    'id' => uniqid('local_'),
+                    'character_id' => $options['character_id'] ?? null
+                ];
+            }
+
             // If image is a URL, download it first
             if (filter_var($imageData, FILTER_VALIDATE_URL)) {
                 $imageData = $this->fileManager->saveImageFromUrl($imageData, 'character');

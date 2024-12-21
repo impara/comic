@@ -318,3 +318,40 @@ body {
   background: #0d6efd;
   color: white !important;
 }
+
+/* Character Options */
+.character-option {
+  position: relative;
+  cursor: pointer;
+  transition: transform var(--transition-speed) var(--transition-timing);
+}
+
+.character-option:hover {
+  transform: translateY(-2px);
+}
+
+/* Selected Overlay */
+.selected-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(74, 144, 226, 0.3);
+  display: none;
+  justify-content: center;
+  align-items: center;
+  border-radius: 6px;
+  pointer-events: none;
+}
+
+.selected-overlay i {
+  font-size: 2rem;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.style-option.selected .selected-overlay,
+.background-option.selected .selected-overlay,
+.character-option.selected .selected-overlay {
+  display: flex;
+}
