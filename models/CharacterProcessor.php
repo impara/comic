@@ -124,14 +124,14 @@ class CharacterProcessor
         $this->logger->info('Saved character image', [
             'path' => $path,
             'filename' => $filename,
-            'url' => rtrim($this->config->getBaseUrl(), '/') . '/generated/' . $filename,
+            'url' => rtrim($this->config->getBaseUrl(), '/') . '/public/generated/' . $filename,
             'permissions' => substr(sprintf('%o', fileperms($path)), -4)
         ]);
 
         return [
             'path' => $path,
             'filename' => $filename,
-            'url' => rtrim($this->config->getBaseUrl(), '/') . '/generated/' . $filename
+            'url' => rtrim($this->config->getBaseUrl(), '/') . '/public/generated/' . $filename
         ];
     }
 
@@ -146,7 +146,7 @@ class CharacterProcessor
         $imageData = [
             'path' => $imagePath,
             'filename' => basename($imagePath),
-            'url' => rtrim($this->config->getBaseUrl(), '/') . '/generated/' . basename($imagePath)
+            'url' => rtrim($this->config->getBaseUrl(), '/') . '/public/generated/' . basename($imagePath)
         ];
 
         // Log the URL we're sending to Replicate
