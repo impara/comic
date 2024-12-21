@@ -188,6 +188,23 @@ class ComicGenerator
     {
         $composition = [];
         foreach ($characters as $charId => $character) {
+            // Skip characters that don't have cartoonified images yet
+            if (!isset($character['cartoonified_image']) && $character['status'] !== 'completed') {
+                $this->logger->info("Waiting for character cartoonification", [
+                    'character_id' => $charId,
+                    'status' => $character['status'] ?? 'unknown'
+                ]);
+                throw new Exception("Character $charId is still being processed");
+            }
+
+            if (!isset($character['cartoonified_image'])) {
+                $this->logger->error("Character missing image data", [
+                    'character_id' => $charId,
+                    'status' => $character['status'] ?? 'unknown'
+                ]);
+                throw new Exception("Character $charId is missing image data");
+            }
+
             $composition[$charId] = [
                 'image' => $character['cartoonified_image'],
                 'position' => $positions[$charId] ?? [],

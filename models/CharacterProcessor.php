@@ -43,6 +43,7 @@ class CharacterProcessor
                     // Skip processing if already a Replicate URL
                     if (strpos($character['image'], 'replicate.delivery') !== false) {
                         $character['cartoonified_image'] = $character['image'];
+                        $character['status'] = 'completed';
                         $results[$character['id']] = $character;
                         continue;
                     }
@@ -61,15 +62,21 @@ class CharacterProcessor
                     // Process the character image
                     $result = $this->cartoonifyCharacter($character['image'], $charOptions);
 
-                    // Store prediction ID and set status as processing
+                    // Initialize character state
                     $character['prediction_id'] = $result['id'];
                     $character['status'] = 'processing';
 
-                    // If output URL is already available, use it
+                    // If output is immediately available (rare case)
                     if (isset($result['output'])) {
                         $character['cartoonified_image'] = $result['output'];
                         $character['status'] = 'completed';
                     }
+
+                    $this->logger->info("Character processing initiated", [
+                        'character_id' => $character['id'],
+                        'prediction_id' => $result['id'],
+                        'status' => $character['status']
+                    ]);
 
                     $results[$character['id']] = $character;
                 } catch (Exception $e) {
@@ -77,7 +84,8 @@ class CharacterProcessor
                         'character_id' => $character['id'],
                         'error' => $e->getMessage()
                     ]);
-                    // Store error but continue processing other characters
+
+                    // Store error but continue with other characters
                     $character['status'] = 'failed';
                     $character['error'] = $e->getMessage();
                     $results[$character['id']] = $character;
