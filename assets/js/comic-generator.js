@@ -31,13 +31,13 @@ export const ComicGenerator = {
             const result = await response.json();
 
             // Check for explicit error first
-            if (result.error) {
-                throw new Error(result.error);
+            if (!result.success || result.error) {
+                throw new Error(result.error || 'Comic generation failed');
             }
 
             // If we have a strip ID, consider it a success even if processing hasn't started
-            if (result.data && result.data.id) {
-                this.stripId = result.data.id;
+            if (result.id) {
+                this.stripId = result.id;
                 this.uiManager.showGeneratingState();
                 this.startPolling();
                 return;
