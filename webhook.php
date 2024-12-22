@@ -20,8 +20,16 @@ class WebhookHandler
     public function handleWebhook(): void
     {
         try {
+            // Log raw request data
+            $rawInput = file_get_contents('php://input');
+            $this->logger->info('Raw webhook data received', [
+                'data' => $rawInput,
+                'headers' => getallheaders(),
+                'method' => $_SERVER['REQUEST_METHOD']
+            ]);
+
             // Get webhook payload
-            $payload = json_decode(file_get_contents('php://input'), true);
+            $payload = json_decode($rawInput, true);
             if (!$payload) {
                 throw new Exception('Invalid webhook payload');
             }

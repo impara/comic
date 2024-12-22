@@ -29,13 +29,22 @@ export const ComicGenerator = {
             }
 
             const result = await response.json();
-            if (result.success && result.data.id) {
+
+            // Check for explicit error first
+            if (result.error) {
+                throw new Error(result.error);
+            }
+
+            // If we have a strip ID, consider it a success even if processing hasn't started
+            if (result.data && result.data.id) {
                 this.stripId = result.data.id;
                 this.uiManager.showGeneratingState();
                 this.startPolling();
-            } else {
-                throw new Error(result.error || 'Failed to start comic generation');
+                return;
             }
+
+            // Only throw generic error if we have no ID and no specific error
+            throw new Error('Invalid server response: missing strip ID');
         } catch (error) {
             console.error('Comic generation error:', error);
             this.handleError(error.message);
@@ -47,18 +56,59 @@ export const ComicGenerator = {
             clearInterval(this.pollInterval);
         }
 
+        const maxPollingTime = 5 * 60 * 1000; // 5 minutes
+        const warningTime = 2 * 60 * 1000;    // 2 minutes
+        const startTime = Date.now();
+        let consecutiveErrors = 0;
+        let warningShown = false;
+
         this.pollInterval = setInterval(async () => {
             try {
+                // Check if we've exceeded max polling time
+                const elapsedTime = Date.now() - startTime;
+                if (elapsedTime > maxPollingTime) {
+                    this.stopPolling();
+                    this.handleError('Comic generation timed out after 5 minutes');
+                    return;
+                }
+
+                // Show warning if taking longer than expected
+                if (!warningShown && elapsedTime > warningTime) {
+                    warningShown = true;
+                    this.uiManager.updateDebugInfo({
+                        stripId: this.stripId,
+                        status: 'processing',
+                        message: 'Processing is taking longer than usual, but still working...'
+                    });
+                }
+
                 const response = await fetch(`/api.php?action=status&id=${this.stripId}`);
                 if (!response.ok) {
-                    throw new Error('Failed to fetch status');
+                    throw new Error(`Server error: ${response.status}`);
                 }
 
                 const state = await response.json();
                 console.log('Comic generation status:', state);
 
+                // Reset error counter on successful response
+                consecutiveErrors = 0;
+
                 // Update UI with progress
                 this.updateProgress(state);
+
+                // Check character processing status
+                if (state.characters) {
+                    const failedCharacters = Object.values(state.characters)
+                        .filter(char => char.status === 'failed');
+
+                    if (failedCharacters.length > 0) {
+                        const errors = failedCharacters
+                            .map(char => `Character ${char.id}: ${char.error || 'Unknown error'}`)
+                            .join('; ');
+                        this.handleError(`Character processing failed: ${errors}`);
+                        return;
+                    }
+                }
 
                 // Check if processing is complete
                 if (state.status === 'completed') {
@@ -68,7 +118,13 @@ export const ComicGenerator = {
                 }
             } catch (error) {
                 console.error('Status polling error:', error);
-                this.handleError('Failed to check generation status');
+                consecutiveErrors++;
+
+                // Stop polling after 3 consecutive errors
+                if (consecutiveErrors >= 3) {
+                    this.stopPolling();
+                    this.handleError('Failed to check generation status after multiple attempts');
+                }
             }
         }, 2000);
     },
@@ -88,12 +144,17 @@ export const ComicGenerator = {
             const totalCharacters = Object.keys(state.characters).length;
             const completedCharacters = Object.values(state.characters)
                 .filter(c => c.status === 'completed').length;
+            const processingCharacters = Object.values(state.characters)
+                .filter(c => c.status === 'processing').length;
 
+            // Show more detailed status information
             this.uiManager.updateDebugInfo({
                 stripId: this.stripId,
                 totalCharacters,
                 completedCharacters,
-                status: state.status
+                processingCharacters,
+                status: state.status,
+                progress: `${completedCharacters}/${totalCharacters} characters completed`
             });
         }
     },

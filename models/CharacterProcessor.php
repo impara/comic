@@ -159,36 +159,86 @@ class CharacterProcessor
             'image_path' => $imagePath
         ]);
 
-        // Get image URL from saved data
-        $generatedPath = basename($this->config->getOutputPath());
-        $imageData = [
-            'path' => $imagePath,
-            'filename' => basename($imagePath),
-            'url' => rtrim($this->config->getBaseUrl(), '/') . '/' . $generatedPath . '/' . basename($imagePath)
-        ];
+        try {
+            // Get image URL from saved data
+            $generatedPath = basename($this->config->getOutputPath());
+            $imageData = [
+                'path' => $imagePath,
+                'filename' => basename($imagePath),
+                'url' => rtrim($this->config->getBaseUrl(), '/') . '/' . $generatedPath . '/' . basename($imagePath)
+            ];
 
-        // Log the URL we're sending to Replicate
-        $this->logger->info('Using image URL for cartoonification', [
-            'url' => $imageData['url'],
-            'full_path' => $imagePath,
-            'exists' => file_exists($imagePath),
-            'permissions' => substr(sprintf('%o', fileperms($imagePath)), -4),
-            'owner' => posix_getpwuid(fileowner($imagePath))['name']
-        ]);
+            // Validate image file
+            if (!file_exists($imagePath)) {
+                throw new Exception('Image file does not exist: ' . $imagePath);
+            }
 
-        // Verify file exists and is accessible
-        if (!file_exists($imagePath)) {
-            throw new Exception('Image file does not exist: ' . $imagePath);
+            if (!is_readable($imagePath)) {
+                throw new Exception('Image file is not readable: ' . $imagePath);
+            }
+
+            // Validate image content
+            $imageInfo = getimagesize($imagePath);
+            if (!$imageInfo) {
+                throw new Exception('Invalid image file or format');
+            }
+
+            $this->logger->info('Image validation passed', [
+                'mime_type' => $imageInfo['mime'],
+                'dimensions' => [$imageInfo[0], $imageInfo[1]],
+                'url' => $imageData['url']
+            ]);
+
+            // Create prediction with retry logic
+            $maxRetries = $this->config->get('replicate.models.cartoonify.max_retries', 2);
+            $retryDelay = $this->config->get('replicate.models.cartoonify.retry_delay', 5);
+            $lastError = null;
+
+            for ($attempt = 0; $attempt <= $maxRetries; $attempt++) {
+                try {
+                    if ($attempt > 0) {
+                        $this->logger->info('Retrying cartoonification', [
+                            'attempt' => $attempt,
+                            'character_id' => $characterId
+                        ]);
+                        sleep($retryDelay);
+                    }
+
+                    $prediction = $this->replicateClient->createPrediction([
+                        'image' => $imageData['url'],
+                        'character_id' => $characterId
+                    ]);
+
+                    if (!isset($prediction['id'])) {
+                        throw new Exception('Invalid prediction response: missing ID');
+                    }
+
+                    $this->logger->info('Cartoonification prediction created', [
+                        'prediction_id' => $prediction['id'],
+                        'character_id' => $characterId,
+                        'attempt' => $attempt + 1
+                    ]);
+
+                    return $prediction;
+                } catch (Exception $e) {
+                    $lastError = $e;
+                    $this->logger->error('Cartoonification attempt failed', [
+                        'attempt' => $attempt + 1,
+                        'character_id' => $characterId,
+                        'error' => $e->getMessage()
+                    ]);
+                }
+            }
+
+            throw new Exception('Failed to start cartoonification after ' . ($maxRetries + 1) . ' attempts: ' . $lastError->getMessage());
+        } catch (Exception $e) {
+            $this->logger->error('Cartoonification failed', [
+                'character_id' => $characterId,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            throw $e;
         }
-
-        if (!is_readable($imagePath)) {
-            throw new Exception('Image file is not readable: ' . $imagePath);
-        }
-
-        return $this->replicateClient->createPrediction([
-            'image' => $imageData['url'],
-            'character_id' => $characterId
-        ]);
     }
 
     private function createPendingFile(string $predictionId, array $data): void
