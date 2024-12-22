@@ -11,7 +11,7 @@ class ComicController
     private $comicGenerator;
 
     // Valid styles and backgrounds
-    private const VALID_STYLES = ['manga', 'comic', 'european', 'modern'];
+    private const VALID_STYLES = ['classic', 'modern', 'manga', 'comic'];
     private const VALID_BACKGROUNDS = ['city', 'nature', 'space', 'fantasy'];
     private const PANEL_COUNT = 4;
 

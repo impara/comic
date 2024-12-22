@@ -17,10 +17,7 @@ class Logger implements LoggerInterface
     {
         $config = Config::getInstance();
 
-        // Test log to verify logger is working
-        error_log("TEST_LOG - Logger initialized at " . date('Y-m-d H:i:s'));
-
-        // Determine if we're in production
+        // Set paths based on environment
         $isProduction = isset($_SERVER['SERVER_NAME']) && strpos($_SERVER['SERVER_NAME'], 'comic.amertech.online') !== false;
 
         // Set paths based on environment
@@ -36,13 +33,14 @@ class Logger implements LoggerInterface
 
         $this->ensureLogDirectory();
 
-        // Write initial test message to verify file is writable
-        $this->error('TEST_LOG - Logger initialized', [
-            'log_file' => $this->logFile,
-            'log_dir' => $this->logDir,
-            'debug_mode' => $config->isDebugMode(),
-            'log_level' => $config->getEnv('LOG_LEVEL', 'unknown'),
-            'time' => date('Y-m-d H:i:s')
+        // Debug environment loading - moved after property initialization
+        $this->error('DEBUG_VERIFY - Environment Loading', [
+            'env_log_level' => getenv('LOG_LEVEL'),
+            'env_app_log_level' => getenv('APP_LOG_LEVEL'),
+            'env_app_debug' => getenv('APP_DEBUG'),
+            'config_debug_mode' => $config->isDebugMode(),
+            'config_log_level' => $config->getLogLevel(),
+            'env_vars' => $_ENV
         ]);
     }
 
@@ -140,8 +138,8 @@ class Logger implements LoggerInterface
 
     private function shouldLog(string $level, string $message): bool
     {
-        // Always log test messages
-        if (str_starts_with($message, 'TEST_LOG') || str_starts_with($message, 'DEBUG_VERIFY')) {
+        // Always log test and debug verification messages
+        if (str_starts_with($message, 'DEBUG_VERIFY')) {
             return true;
         }
 
@@ -150,8 +148,17 @@ class Logger implements LoggerInterface
             return true;
         }
 
-        // Get configured log level
-        $configLevel = strtoupper(Config::getInstance()->getEnv('LOG_LEVEL', 'INFO'));
+        $config = Config::getInstance();
+
+        // Get log level with precedence:
+        // 1. LOG_LEVEL from env
+        // 2. APP_LOG_LEVEL from env
+        // 3. Default to INFO
+        $configLevel = strtoupper(
+            getenv('LOG_LEVEL') ?:
+                getenv('APP_LOG_LEVEL') ?:
+                'INFO'
+        );
 
         $logLevels = [
             'DEBUG' => 0,
@@ -160,24 +167,44 @@ class Logger implements LoggerInterface
             'ERROR' => 3
         ];
 
-        // If we're in debug mode or log level is debug, log everything
-        if (Config::getInstance()->isDebugMode() || $configLevel === 'DEBUG') {
+        // If debug mode is enabled, log everything
+        if ($config->isDebugMode()) {
+            $this->error('DEBUG_VERIFY - Debug mode enabled, logging everything', [
+                'level' => $level,
+                'message' => $message,
+                'debug_mode' => true
+            ]);
             return true;
         }
 
-        // If level isn't recognized, allow it through
+        // If level isn't recognized, log it
         if (!isset($logLevels[$level])) {
+            $this->error('DEBUG_VERIFY - Unrecognized log level', [
+                'level' => $level,
+                'message' => $message
+            ]);
             return true;
         }
 
-        return isset($logLevels[$configLevel]) && $logLevels[$level] >= $logLevels[$configLevel];
+        // Log if current level is >= configured level
+        $shouldLog = isset($logLevels[$configLevel]) &&
+            $logLevels[$level] >= $logLevels[$configLevel];
+
+        if ($shouldLog) {
+            $this->error('DEBUG_VERIFY - Log level check passed', [
+                'level' => $level,
+                'config_level' => $configLevel,
+                'message' => $message
+            ]);
+        }
+
+        return $shouldLog;
     }
 
     private function log(string $level, string $message, array $context): void
     {
         // Direct write for test messages and errors
         if (
-            str_starts_with($message, 'TEST_LOG') ||
             str_starts_with($message, 'DEBUG_VERIFY') ||
             $level === 'ERROR'
         ) {
@@ -214,7 +241,7 @@ class Logger implements LoggerInterface
             ) . PHP_EOL;
 
             // Add debug info for test messages
-            if (str_starts_with($message, 'TEST_LOG') || str_starts_with($message, 'DEBUG_VERIFY')) {
+            if (str_starts_with($message, 'DEBUG_VERIFY')) {
                 $debugInfo = sprintf(
                     "[DEBUG] Log level: %s, Debug mode: %s, Config level: %s\n",
                     $level,

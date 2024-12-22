@@ -48,27 +48,31 @@ class ComicGenerator
                 'character_count' => count($characters)
             ]);
 
+            // Initialize strip state
+            $this->stateManager->initializeStrip($stripId, array_merge($options, [
+                'story' => $story
+            ]));
+
+            // Update to characters pending state
+            $this->stateManager->updateStripState($stripId, [
+                'status' => StateManager::STATE_CHARACTERS_PENDING
+            ]);
+
             // Process characters
             $processedCharacters = $this->characterProcessor->processCharacters($characters, $stripId);
 
-            // Initialize strip state
-            $stripState = [
-                'id' => $stripId,
-                'status' => 'processing',
+            // Update state with processed characters
+            $this->stateManager->updateStripState($stripId, [
                 'characters' => $processedCharacters,
-                'story' => $story,
-                'progress' => 0,
-                'created_at' => time()
-            ];
-
-            $this->stateManager->updateStripState($stripId, $stripState);
+                'status' => StateManager::STATE_CHARACTERS_PROCESSING
+            ]);
 
             // Return success response with strip ID
             return [
                 'success' => true,
                 'data' => [
                     'id' => $stripId,
-                    'status' => 'processing',
+                    'status' => StateManager::STATE_CHARACTERS_PROCESSING,
                     'message' => 'Comic generation started',
                     'characters' => $processedCharacters
                 ]
@@ -86,38 +90,233 @@ class ComicGenerator
     }
 
     /**
+     * Check if all characters are ready for panel generation
+     */
+    private function areCharactersReady(array $characters): bool
+    {
+        foreach ($characters as $character) {
+            if ($character['status'] !== 'completed') {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Start panel generation after characters are ready
+     */
+    public function startPanelGeneration(string $stripId): void
+    {
+        try {
+            $this->logger->info('Starting panel generation', ['strip_id' => $stripId]);
+
+            // Update state to panels generating
+            $this->stateManager->updateStripState($stripId, [
+                'status' => StateManager::STATE_PANELS_GENERATING
+            ]);
+
+            // Get strip state
+            $stripState = $this->stateManager->getStripState($stripId);
+            if (!$stripState) {
+                throw new Exception('Strip state not found');
+            }
+
+            // Get story and options from state
+            $story = $stripState['options']['story'] ?? null;
+            $options = $stripState['options'] ?? [];
+
+            if (!$story) {
+                throw new Exception('Story not found in strip options');
+            }
+
+            // Segment story into panels
+            $segments = $this->storyParser->segmentStory($story, [
+                'style' => $options['style'] ?? 'default',
+                'panel_count' => 4,
+                'characters' => $stripState['characters'] ?? []
+            ]);
+
+            // Process panel descriptions
+            $segments = $this->storyParser->processPanelDescriptions($segments, [
+                'style' => $options['style'] ?? 'default'
+            ]);
+
+            $this->logger->info('Story segmented into panels', [
+                'strip_id' => $stripId,
+                'panel_count' => count($segments)
+            ]);
+
+            // Initialize and generate each panel
+            $generatedPanels = [];
+            foreach ($segments as $index => $segment) {
+                $panelId = uniqid('panel_');
+
+                // Initialize panel
+                $this->stateManager->initializePanel($stripId, $panelId, $segment, [
+                    'panel_index' => $index,
+                    'style' => $options['style'] ?? 'default'
+                ]);
+
+                // Generate panel
+                try {
+                    $generatedPanel = $this->generatePanel(
+                        $stripState['characters'],
+                        $segment,
+                        $panelId,
+                        array_merge($options, ['panel_index' => $index])
+                    );
+                    $generatedPanels[] = $generatedPanel;
+
+                    $this->logger->info('Panel generated successfully', [
+                        'strip_id' => $stripId,
+                        'panel_id' => $panelId,
+                        'index' => $index
+                    ]);
+                } catch (Exception $e) {
+                    $this->logger->error('Failed to generate panel', [
+                        'strip_id' => $stripId,
+                        'panel_id' => $panelId,
+                        'index' => $index,
+                        'error' => $e->getMessage()
+                    ]);
+                    throw $e;
+                }
+            }
+
+            if (empty($generatedPanels)) {
+                throw new Exception('No panels were generated successfully');
+            }
+
+            // Update state to composing
+            $this->stateManager->updateStripState($stripId, [
+                'status' => StateManager::STATE_PANELS_COMPOSING
+            ]);
+
+            // Get panel output paths
+            $panelPaths = array_map(function ($panel) {
+                return $panel['output'] ?? null;
+            }, $generatedPanels);
+
+            // Filter out any null values
+            $panelPaths = array_filter($panelPaths);
+
+            if (empty($panelPaths)) {
+                throw new Exception('No valid panel outputs found');
+            }
+
+            // Start composing panels
+            $this->imageComposer->composeStrip($panelPaths, $stripId);
+
+            // Update state to complete
+            $this->stateManager->updateStripState($stripId, [
+                'status' => StateManager::STATE_COMPLETE
+            ]);
+
+            $this->logger->info('Comic strip completed', [
+                'strip_id' => $stripId,
+                'panel_count' => count($panelPaths)
+            ]);
+        } catch (Exception $e) {
+            $this->logger->error('Failed to start panel generation', [
+                'strip_id' => $stripId,
+                'error' => $e->getMessage()
+            ]);
+
+            // Update state to failed
+            $this->stateManager->updateStripState($stripId, [
+                'status' => StateManager::STATE_FAILED,
+                'error' => 'Failed to generate panels: ' . $e->getMessage()
+            ]);
+
+            throw $e;
+        }
+    }
+
+    /**
      * Generate a single panel
      */
     private function generatePanel(array $characters, string $description, string $panelId, array $options): array
     {
         try {
-            $this->stateManager->updatePanelState($panelId, ['status' => StateManager::STATUS_PROCESSING]);
+            // Initialize panel state
+            $this->stateManager->updatePanelState($panelId, [
+                'status' => StateManager::PANEL_STATE_INIT,
+                'description' => $description,
+                'options' => $options
+            ]);
 
             // Process character positions
             $characterPositions = $this->processCharacterInteractions($characters, $description, $options);
-            $this->stateManager->updatePanelState($panelId, ['character_positions' => $characterPositions]);
-
-            // Compose panel image
-            $composedPanelPath = $this->imageComposer->composePanelImage(
-                $this->preparePanelComposition($characters, $characterPositions),
-                $description,
-                $options
-            );
-
-            // Update final state
             $this->stateManager->updatePanelState($panelId, [
-                'status' => StateManager::STATUS_COMPLETED,
-                'output_path' => $composedPanelPath
+                'character_positions' => $characterPositions,
+                'status' => StateManager::PANEL_STATE_BACKGROUND_PENDING
+            ]);
+
+            // Start background generation
+            $response = $this->imageComposer->generateBackground($description, $options['style'] ?? []);
+
+            // Store prediction ID for webhook handling
+            $this->stateManager->updatePanelState($panelId, [
+                'background_prediction_id' => $response['id'],
+                'status' => StateManager::PANEL_STATE_BACKGROUND_PROCESSING,
+                'progress' => 30
+            ]);
+
+            $this->logger->info('Panel background generation started', [
+                'panel_id' => $panelId,
+                'prediction_id' => $response['id']
             ]);
 
             return [
                 'id' => $panelId,
-                'status' => StateManager::STATUS_COMPLETED,
-                'output' => $composedPanelPath
+                'status' => StateManager::PANEL_STATE_BACKGROUND_PROCESSING,
+                'prediction_id' => $response['id']
             ];
         } catch (Exception $e) {
             $this->stateManager->updatePanelState($panelId, [
-                'status' => StateManager::STATUS_FAILED,
+                'status' => StateManager::PANEL_STATE_FAILED,
+                'error' => $e->getMessage()
+            ]);
+            throw $e;
+        }
+    }
+
+    /**
+     * Check if panel background is ready and start composition
+     */
+    public function checkAndStartPanelComposition(string $panelId): void
+    {
+        $panelState = $this->stateManager->getPanelState($panelId);
+        if (!$panelState) {
+            throw new Exception("Panel state not found: $panelId");
+        }
+
+        if ($panelState['status'] !== StateManager::PANEL_STATE_BACKGROUND_READY) {
+            return;
+        }
+
+        try {
+            // Compose panel with background and characters
+            $composedPanelPath = $this->imageComposer->composePanelImage(
+                $this->preparePanelComposition($panelState['characters'], $panelState['character_positions']),
+                $panelState['description'],
+                $panelState['options']
+            );
+
+            // Update final state
+            $this->stateManager->updatePanelState($panelId, [
+                'status' => StateManager::PANEL_STATE_COMPLETE,
+                'output_path' => $composedPanelPath,
+                'progress' => 100
+            ]);
+
+            $this->logger->info('Panel composition completed', [
+                'panel_id' => $panelId,
+                'output_path' => $composedPanelPath
+            ]);
+        } catch (Exception $e) {
+            $this->stateManager->updatePanelState($panelId, [
+                'status' => StateManager::PANEL_STATE_FAILED,
                 'error' => $e->getMessage()
             ]);
             throw $e;

@@ -14,15 +14,15 @@ class CharacterProcessor
     private Config $config;
     private FileManager $fileManager;
 
-    public function __construct(LoggerInterface $logger)
+    public function __construct(LoggerInterface $logger, Config $config)
     {
         $this->logger = $logger;
-        $this->config = Config::getInstance();
+        $this->config = $config;
         $this->replicateClient = new ReplicateClient(
             $this->config->getApiToken(),
             $logger
         );
-        $this->imageComposer = new ImageComposer($logger);
+        $this->imageComposer = new ImageComposer($logger, $config);
         $this->fileManager = FileManager::getInstance($logger);
     }
 
@@ -63,7 +63,7 @@ class CharacterProcessor
                 // Add to processed characters
                 $processedCharacters[$character['id']] = [
                     'id' => $character['id'],
-                    'status' => 'processing',
+                    'status' => StateManager::STATE_CHARACTERS_PROCESSING,
                     'prediction_id' => $prediction['id']
                 ];
 
@@ -79,7 +79,7 @@ class CharacterProcessor
 
                 $processedCharacters[$character['id']] = [
                     'id' => $character['id'],
-                    'status' => 'failed',
+                    'status' => StateManager::STATE_FAILED,
                     'error' => $e->getMessage()
                 ];
             }

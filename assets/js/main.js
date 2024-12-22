@@ -76,7 +76,7 @@ class App {
                 await FormHandler.initializeCharacterGrid();
                 await FormHandler.initializeEventHandlers();
                 await FormHandler.updateFormState();
-                await ComicGenerator.init();
+                await ComicGenerator.init(UIManager);
 
                 // Initialize examples after core functionality
                 this.initializeExamplePrompts();

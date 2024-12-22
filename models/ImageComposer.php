@@ -9,10 +9,10 @@ class ImageComposer
     private Config $config;
     private string $outputDir;
 
-    public function __construct(LoggerInterface $logger)
+    public function __construct(LoggerInterface $logger, Config $config)
     {
         $this->logger = $logger;
-        $this->config = Config::getInstance();
+        $this->config = $config;
         $this->outputDir = $this->config->getOutputPath();
     }
 
@@ -28,7 +28,7 @@ class ImageComposer
     public function composePanel(array $images, array $sceneContext = [], array $userPositions = []): string
     {
         $panelId = $sceneContext['panel_id'] ?? null;
-        $this->logger->error("TEST_LOG - composePanel received images", [
+        $this->logger->error("DEBUG_VERIFY - composePanel received images", [
             'image_count' => count($images),
             'panel_id' => $panelId,
             'images' => array_map(function ($url, $index) {
@@ -47,8 +47,8 @@ class ImageComposer
                 $stateFile = $this->config->getTempPath() . "state_{$panelId}.json";
                 if (file_exists($stateFile)) {
                     $state = json_decode(file_get_contents($stateFile), true);
-                    $state['composition_status'] = 'processing';
-                    $state['composition_started_at'] = time();
+                    $state['composition_status'] = StateManager::STATE_PANELS_COMPOSING;
+                    $state['updated_at'] = time();
                     file_put_contents($stateFile, json_encode($state));
                 }
             }
@@ -91,7 +91,7 @@ class ImageComposer
 
             // Add each character to the panel
             foreach ($validImages as $index => $imageUrl) {
-                $this->logger->error("TEST_LOG - Adding image to panel", [
+                $this->logger->error("DEBUG_VERIFY - Adding image to panel", [
                     'index' => $index,
                     'image_url' => $imageUrl,
                     'position' => $positions[$index] ?? 'unknown',
@@ -132,7 +132,7 @@ class ImageComposer
                 $x = $position['x'] - ($newWidth / 2);  // Center horizontally
                 $y = $position['y'] - ($newHeight / 2); // Center vertically
 
-                $this->logger->error("TEST_LOG - Image dimensions for panel", [
+                $this->logger->error("DEBUG_VERIFY - Image dimensions for panel", [
                     'index' => $index,
                     'original_width' => $srcWidth,
                     'original_height' => $srcHeight,
@@ -170,14 +170,14 @@ class ImageComposer
                 $stateFile = $this->config->getTempPath() . "state_{$panelId}.json";
                 if (file_exists($stateFile)) {
                     $state = json_decode(file_get_contents($stateFile), true);
-                    $state['composition_status'] = 'succeeded';
-                    $state['composition_completed_at'] = time();
+                    $state['composition_status'] = StateManager::STATE_COMPLETE;
+                    $state['updated_at'] = time();
                     $state['composed_panel_path'] = $outputPath;
                     file_put_contents($stateFile, json_encode($state));
                 }
             }
 
-            $this->logger->error("TEST_LOG - Panel composition completed", [
+            $this->logger->error("DEBUG_VERIFY - Panel composition completed", [
                 'output_path' => $outputPath,
                 'file_exists' => file_exists($outputPath),
                 'file_size' => file_exists($outputPath) ? filesize($outputPath) : 0,
@@ -208,7 +208,7 @@ class ImageComposer
         $stateFile = $this->config->getTempPath() . "state_{$panelId}.json";
         if (file_exists($stateFile)) {
             $state = json_decode(file_get_contents($stateFile), true);
-            $state['composition_status'] = 'failed';
+            $state['composition_status'] = StateManager::STATE_FAILED;
             $state['composition_error'] = $error;
             $state['composition_failed_at'] = time();
             file_put_contents($stateFile, json_encode($state));
@@ -397,7 +397,7 @@ class ImageComposer
     private function loadImageFromUrl(string $url): \GdImage|false
     {
         try {
-            $this->logger->error("TEST_LOG - Loading image from URL", [
+            $this->logger->error("DEBUG_VERIFY - Loading image from URL", [
                 'url' => $url,
                 'is_replicate_url' => strpos($url, 'replicate.delivery') !== false
             ]);
@@ -422,7 +422,7 @@ class ImageComposer
                 return false;
             }
 
-            $this->logger->error("TEST_LOG - Successfully loaded image", [
+            $this->logger->error("DEBUG_VERIFY - Successfully loaded image", [
                 'url' => $url,
                 'width' => imagesx($image),
                 'height' => imagesy($image)
@@ -642,14 +642,57 @@ class ImageComposer
             $width = $options['style']['width'] ?? 1024;
             $height = $options['style']['height'] ?? 1024;
 
-            // Create panel canvas
-            $panel = imagecreatetruecolor($width, $height);
-            imagealphablending($panel, true);
-            imagesavealpha($panel, true);
+            // Build background prompt
+            $style = $options['style'] ?? [];
+            $backgroundPrompt = $this->buildBackgroundPrompt($sceneDescription, $style);
 
-            // Fill with background color based on mood
-            $bgColor = $this->getBackgroundColor($panel, $options['style']['consistency_anchors']['panel_mood'] ?? 'neutral');
-            imagefill($panel, 0, 0, $bgColor);
+            // Call Replicate SDXL API to generate background
+            $response = $this->makeReplicateRequest('predictions', [
+                'version' => $this->config->get('replicate.models.sdxl.version'),
+                'input' => [
+                    'prompt' => $backgroundPrompt,
+                    'negative_prompt' => 'text, watermark, logo, signature, characters, people, blurry, low quality',
+                    'num_inference_steps' => 50,
+                    'guidance_scale' => 7.5,
+                    'width' => $width,
+                    'height' => $height,
+                    'scheduler' => 'DPM++ 2M Karras',
+                    'refine' => 'expert_ensemble_refiner',
+                    'high_noise_frac' => 0.8,
+                    'refine_steps' => 25
+                ],
+                'webhook_completed' => $this->config->getBaseUrl() . '/webhook.php'
+            ]);
+
+            // Poll for completion
+            $predictionId = $response['id'];
+            $maxAttempts = 60; // 5 minutes with 5-second intervals
+            $attempt = 0;
+            $backgroundUrl = null;
+
+            while ($attempt < $maxAttempts) {
+                $status = $this->makeReplicateRequest("predictions/{$predictionId}", [], 'GET');
+
+                if ($status['status'] === 'succeeded') {
+                    $backgroundUrl = $status['output'][0] ?? null;
+                    break;
+                } elseif ($status['status'] === 'failed') {
+                    throw new Exception($status['error'] ?? 'Background generation failed');
+                }
+
+                $attempt++;
+                sleep(5);
+            }
+
+            if (!$backgroundUrl) {
+                throw new Exception('Background generation timed out or failed to produce output');
+            }
+
+            // Load the generated background
+            $panel = $this->loadImageFromUrl($backgroundUrl);
+            if (!$panel) {
+                throw new Exception('Failed to load generated background image');
+            }
 
             // Sort characters by z-index for proper layering
             uasort($panelComposition, function ($a, $b) {
@@ -671,7 +714,7 @@ class ImageComposer
                 // Apply style adjustments
                 $characterImage = $this->applyStyleAdjustments(
                     $characterImage,
-                    $options['style'] ?? [],
+                    $style,
                     $charData['position']['scale'] ?? 1.0
                 );
 
@@ -700,7 +743,7 @@ class ImageComposer
             }
 
             // Apply panel-wide style effects
-            $this->applyPanelEffects($panel, $options['style'] ?? []);
+            $this->applyPanelEffects($panel, $style);
 
             // Save the composed panel
             $outputPath = $this->config->getTempPath() . 'composed_panel_' . uniqid() . '.png';
@@ -718,24 +761,79 @@ class ImageComposer
     }
 
     /**
-     * Get background color based on panel mood
-     * @param \GdImage $image GD image resource
-     * @param string $mood Panel mood
-     * @return int Color identifier
+     * Build background prompt for SDXL
      */
-    private function getBackgroundColor(\GdImage $image, string $mood): int
+    private function buildBackgroundPrompt(string $sceneDescription, array $style): string
     {
-        $colors = [
-            'establishing' => [245, 245, 245], // Light gray for establishing shots
-            'developing' => [240, 245, 250],   // Light blue tint for development
-            'transitional' => [245, 240, 245], // Light purple tint for transitions
-            'climactic' => [250, 240, 240],    // Light red tint for climactic moments
-            'resolving' => [240, 250, 240],    // Light green tint for resolution
-            'neutral' => [255, 255, 255]       // White for neutral scenes
-        ];
+        $styleDesc = match ($style['name'] ?? 'default') {
+            'manga' => 'manga style, black and white, high contrast, detailed linework',
+            'comic' => 'western comic book style, vibrant colors, dynamic shading',
+            'cartoon' => 'cartoon style, simple shapes, bold colors',
+            default => 'digital art style, detailed, high quality'
+        };
 
-        $rgb = $colors[$mood] ?? $colors['neutral'];
-        return imagecolorallocate($image, $rgb[0], $rgb[1], $rgb[2]);
+        $background = $style['background'] ?? 'neutral';
+        $backgroundDesc = match ($background) {
+            'city' => 'urban cityscape background, buildings, streets',
+            'nature' => 'natural landscape background, trees, mountains',
+            'indoor' => 'indoor room background, walls, furniture',
+            'fantasy' => 'fantasy environment background, magical elements',
+            default => 'simple gradient background'
+        };
+
+        $mood = $style['consistency_anchors']['panel_mood'] ?? 'neutral';
+        $moodDesc = match ($mood) {
+            'dramatic' => 'dramatic lighting, high contrast',
+            'bright' => 'bright and cheerful atmosphere',
+            'dim' => 'dark and moody atmosphere',
+            'warm' => 'warm color tones',
+            'cool' => 'cool color tones',
+            default => 'balanced lighting'
+        };
+
+        // Enhanced prompt engineering for SDXL
+        return "Background scene: $sceneDescription. $styleDesc, $backgroundDesc, $moodDesc, no characters or people, establishing shot, masterpiece, best quality, highly detailed, sharp focus, 8k resolution";
+    }
+
+    /**
+     * Make HTTP request to Replicate API
+     */
+    private function makeReplicateRequest(string $endpoint, array $data = [], string $method = 'POST'): array
+    {
+        $url = 'https://api.replicate.com/v1/' . $endpoint;
+        $token = $this->config->get('replicate.api_token');
+
+        $ch = curl_init($url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, [
+            'Authorization: Token ' . $token,
+            'Content-Type: application/json'
+        ]);
+
+        if ($method === 'POST') {
+            // Get base model parameters from config
+            $modelParams = $this->config->get('replicate.models.sdxl.params');
+
+            // Merge with provided data, allowing overrides
+            $data['input'] = array_merge($modelParams, $data['input'] ?? []);
+
+            // Add negative prompts from config
+            $negativePrompts = $this->config->get('negative_prompts');
+            $data['input']['negative_prompt'] = implode(', ', $negativePrompts);
+
+            curl_setopt($ch, CURLOPT_POST, true);
+            curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
+        }
+
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($httpCode !== 200 && $httpCode !== 201) {
+            throw new Exception('Replicate API request failed: ' . $response);
+        }
+
+        return json_decode($response, true);
     }
 
     /**
@@ -1074,5 +1172,58 @@ class ImageComposer
             'completed_count' => $completedCount,
             'total_count' => count($state['panels'])
         ]);
+    }
+
+    /**
+     * Generate background using SDXL
+     * @param string $description Scene description
+     * @param array $style Style options
+     * @return array Replicate API response
+     */
+    public function generateBackground(string $description, array $style): array
+    {
+        try {
+            // Build background prompt
+            $backgroundPrompt = $this->buildBackgroundPrompt($description, $style);
+
+            // Get model version from config
+            $modelVersion = $this->config->get('replicate.models.sdxl.version');
+
+            // Get base parameters from config
+            $baseParams = $this->config->get('replicate.models.sdxl.params');
+
+            // Prepare request data
+            $requestData = [
+                'version' => $modelVersion,
+                'input' => array_merge($baseParams, [
+                    'prompt' => $backgroundPrompt,
+                    'negative_prompt' => 'text, watermark, logo, signature, characters, people, blurry, low quality, deformed, disfigured, mutated, bad anatomy',
+                    'width' => $style['width'] ?? $baseParams['width'],
+                    'height' => $style['height'] ?? $baseParams['height'],
+                    'apply_watermark' => false,
+                    'scheduler' => "DPM++ 2M Karras",
+                    'refine' => "expert_ensemble_refiner",
+                    'high_noise_frac' => 0.8,
+                    'refine_steps' => 25,
+                    'prompt_strength' => 0.8
+                ]),
+                'webhook_completed' => $this->config->get('app.base_url') . '/webhook.php'
+            ];
+
+            $this->logger->info('Generating background with SDXL', [
+                'prompt' => $backgroundPrompt,
+                'model_version' => $modelVersion,
+                'parameters' => $requestData['input']
+            ]);
+
+            // Make API request
+            return $this->makeReplicateRequest('predictions', $requestData);
+        } catch (Exception $e) {
+            $this->logger->error('Background generation failed', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            throw $e;
+        }
     }
 }

@@ -3,6 +3,10 @@
 require_once __DIR__ . '/models/StateManager.php';
 require_once __DIR__ . '/models/Config.php';
 require_once __DIR__ . '/models/Logger.php';
+require_once __DIR__ . '/models/ComicGenerator.php';
+require_once __DIR__ . '/models/ImageComposer.php';
+require_once __DIR__ . '/models/CharacterProcessor.php';
+require_once __DIR__ . '/models/StoryParser.php';
 
 class WebhookHandler
 {
@@ -28,6 +32,7 @@ class WebhookHandler
                 'method' => $_SERVER['REQUEST_METHOD']
             ]);
 
+
             // Get webhook payload
             $payload = json_decode($rawInput, true);
             if (!$payload) {
@@ -36,12 +41,82 @@ class WebhookHandler
 
             $this->logger->info('Received webhook', ['payload' => $payload]);
 
-            // Get prediction ID and read pending file
+            // Extract prediction details
             $predictionId = $payload['id'] ?? null;
-            if (!$predictionId) {
-                throw new Exception('Missing prediction ID');
+            $status = $payload['status'] ?? null;
+            $output = $payload['output'] ?? null;
+            $error = $payload['error'] ?? null;
+            $version = $payload['version'] ?? null;
+
+            if (!$predictionId || !$status) {
+                throw new Exception('Missing required webhook data');
             }
 
+            // Determine model type from version
+            $modelType = null;
+            foreach ($this->config->get('replicate.models') as $type => $model) {
+                if ($model['version'] === $version) {
+                    $modelType = $type;
+                    break;
+                }
+            }
+
+            if (!$modelType) {
+                throw new Exception('Unknown model version');
+            }
+
+            // Handle different model types
+            switch ($modelType) {
+                case 'cartoonify':
+                    $this->handleCartoonifyWebhook($payload);
+                    break;
+                case 'sdxl':
+                    $this->handleSdxlWebhook($payload);
+                    break;
+                default:
+                    throw new Exception('Unsupported model type');
+            }
+
+            http_response_code(200);
+            echo json_encode(['success' => true]);
+        } catch (Exception $e) {
+            $this->logger->error('Webhook processing failed', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            http_response_code(500);
+            echo json_encode([
+                'success' => false,
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
+
+    private function handleCartoonifyWebhook(array $payload): void
+    {
+        $predictionId = $payload['id'];
+        $status = $payload['status'];
+        $output = $payload['output'] ?? null;
+
+        // Use a transaction-like approach for state updates
+        $lockFile = $this->config->get('paths.temp') . "/webhook_{$predictionId}.lock";
+        $lockFp = fopen($lockFile, 'c+');
+
+        if (!$lockFp) {
+            throw new Exception("Could not create webhook lock file");
+        }
+
+        try {
+            // Try to acquire lock with timeout
+            $startTime = time();
+            while (!flock($lockFp, LOCK_EX | LOCK_NB)) {
+                if (time() - $startTime >= 10) { // 10 second timeout
+                    throw new Exception("Timeout waiting for webhook lock");
+                }
+                usleep(250000); // Wait 250ms before retrying
+            }
+
+            // Get pending file data
             $pendingFile = $this->config->getTempPath() . "pending_{$predictionId}.json";
             if (!file_exists($pendingFile)) {
                 throw new Exception('Pending file not found');
@@ -52,141 +127,330 @@ class WebhookHandler
                 throw new Exception('Invalid pending data');
             }
 
-            // Extract basic information
+            // Extract required data
             $stripId = $pendingData['strip_id'] ?? null;
             $characterId = $pendingData['options']['character_id'] ?? null;
-            $status = $payload['status'] ?? null;
-            $output = $payload['output'] ?? null;
 
             if (!$stripId || !$characterId) {
                 throw new Exception('Missing required data');
             }
 
-            // Update character state
-            $stripState = $this->stateManager->getStripState($stripId);
-
-            if (!isset($stripState['characters'])) {
-                $stripState['characters'] = [];
-            }
-
-            // Simple character state update
             if ($status === 'succeeded' && $output) {
-                $this->logger->info('Processing successful cartoonification', [
-                    'replicate_url' => $output,
-                    'character_id' => $characterId
-                ]);
-
-                // Generate unique filename for cartoonified image
-                $originalFilename = $pendingData['image_path'] ?? uniqid();
-                $filename = 'cartoonified_' . $originalFilename;
-                $outputPath = rtrim($this->config->getOutputPath(), '/') . '/' . $filename;
-
-                try {
-                    $imageContent = file_get_contents($output);
-                    if ($imageContent === false) {
-                        throw new Exception('Failed to download cartoonified image');
-                    }
-
-                    if (file_put_contents($outputPath, $imageContent) === false) {
-                        throw new Exception('Failed to save cartoonified image');
-                    }
-
-                    // Set proper permissions
-                    chmod($outputPath, 0644);
-                    if (function_exists('posix_getpwuid')) {
-                        chown($outputPath, 'www-data');
-                        chgrp($outputPath, 'www-data');
-                    }
-
-                    $this->logger->info('Saved cartoonified image', [
-                        'path' => $outputPath,
-                        'filename' => $filename,
-                        'size' => strlen($imageContent),
-                        'permissions' => substr(sprintf('%o', fileperms($outputPath)), -4),
-                        'owner' => function_exists('posix_getpwuid') ? posix_getpwuid(fileowner($outputPath))['name'] : 'unknown'
-                    ]);
-
-                    // Update character state with local URL
-                    $generatedPath = basename($this->config->getOutputPath());
-                    $localUrl = rtrim($this->config->getBaseUrl(), '/') . '/' . $generatedPath . '/' . $filename;
-                    $stripState['characters'][$characterId] = [
-                        'id' => $characterId,
-                        'image_url' => $localUrl,
-                        'status' => 'completed'
-                    ];
-
-                    $this->logger->info('Updated character state', [
-                        'character_id' => $characterId,
-                        'image_url' => $localUrl
-                    ]);
-                } catch (Exception $e) {
-                    $this->logger->error('Failed to handle cartoonified image', [
-                        'error' => $e->getMessage(),
-                        'character_id' => $characterId
-                    ]);
-
-                    $stripState['characters'][$characterId] = [
-                        'id' => $characterId,
-                        'status' => 'failed',
-                        'error' => 'Failed to save cartoonified image: ' . $e->getMessage()
-                    ];
-                }
+                $this->handleCartoonifySuccess($stripId, $characterId, $output, $pendingData);
             } else {
-                $stripState['characters'][$characterId] = [
-                    'id' => $characterId,
-                    'status' => 'failed',
-                    'error' => $payload['error'] ?? 'Processing failed'
-                ];
+                $this->handleCartoonifyFailure($stripId, $characterId, $payload['error'] ?? 'Processing failed');
             }
 
-            // Update strip progress
-            $totalCharacters = count($stripState['characters']);
-            $completedCharacters = count(array_filter(
-                $stripState['characters'],
-                fn($char) => $char['status'] === 'completed'
-            ));
-
-            $stripState['progress'] = $totalCharacters > 0
-                ? round(($completedCharacters / $totalCharacters) * 100)
-                : 0;
-
-            // Update strip status
-            $allComplete = $completedCharacters === $totalCharacters;
-            $anyFailed = count(array_filter(
-                $stripState['characters'],
-                fn($char) => $char['status'] === 'failed'
-            )) > 0;
-
-            if ($allComplete) {
-                $stripState['status'] = 'completed';
-                // Set the output path to the last completed character's image
-                $lastCompleted = array_filter($stripState['characters'], fn($char) => $char['status'] === 'completed');
-                $lastChar = end($lastCompleted);
-                $stripState['output_path'] = $lastChar['image_url'];
-            } elseif ($anyFailed) {
-                $stripState['status'] = 'failed';
-                $stripState['error'] = 'One or more characters failed to process';
-            } else {
-                $stripState['status'] = 'processing';
-            }
-
-            // Save state and clean up
-            $this->stateManager->updateStripState($stripId, $stripState);
+            // Clean up pending file
             if (file_exists($pendingFile)) {
                 unlink($pendingFile);
             }
 
-            http_response_code(200);
-            echo json_encode(['success' => true]);
+            // Get updated state and map for frontend
+            $stripState = $this->stateManager->getStripState($stripId);
+            if ($stripState) {
+                // Map state for frontend response
+                $apiState = $this->stateManager->mapStateForApi($stripState);
+
+                $this->logger->info('Strip state updated after cartoonify', [
+                    'strip_id' => $stripId,
+                    'status' => $apiState['status'],
+                    'progress' => $apiState['progress'],
+                    'current_operation' => $apiState['current_operation']
+                ]);
+            }
+        } finally {
+            // Always release the lock
+            flock($lockFp, LOCK_UN);
+            fclose($lockFp);
+            @unlink($lockFile);
+        }
+    }
+
+    private function handleSdxlWebhook(array $payload): void
+    {
+        $predictionId = $payload['id'];
+        $status = $payload['status'];
+        $output = $payload['output'] ?? null;
+        $error = $payload['error'] ?? null;
+
+        // Find associated panel state
+        $panelStates = glob($this->config->get('paths.temp') . '/state_panel_*.json');
+        $targetPanel = null;
+        $targetState = null;
+
+        // Use a transaction-like approach for state updates
+        $lockFile = $this->config->get('paths.temp') . "/webhook_{$predictionId}.lock";
+        $lockFp = fopen($lockFile, 'c+');
+
+        if (!$lockFp) {
+            throw new Exception("Could not create webhook lock file");
+        }
+
+        try {
+            // Try to acquire lock with timeout
+            $startTime = time();
+            while (!flock($lockFp, LOCK_EX | LOCK_NB)) {
+                if (time() - $startTime >= 10) { // 10 second timeout
+                    throw new Exception("Timeout waiting for webhook lock");
+                }
+                usleep(250000); // Wait 250ms before retrying
+            }
+
+            foreach ($panelStates as $statePath) {
+                $state = json_decode(file_get_contents($statePath), true);
+                if (isset($state['background_prediction_id']) && $state['background_prediction_id'] === $predictionId) {
+                    $targetPanel = basename($statePath, '.json');
+                    $targetState = $state;
+                    break;
+                }
+            }
+
+            if (!$targetPanel || !$targetState) {
+                throw new Exception('Could not find panel state for prediction ' . $predictionId);
+            }
+
+            if ($status === 'succeeded' && $output) {
+                // Update panel state with background URL
+                $this->stateManager->updatePanelState($targetPanel, [
+                    'background_url' => $output[0],
+                    'background_generated_at' => time(),
+                    'status' => StateManager::PANEL_STATE_BACKGROUND_READY,
+                    'progress' => 60
+                ]);
+
+                $this->logger->info('Panel background generated', [
+                    'panel_id' => $targetPanel,
+                    'prediction_id' => $predictionId,
+                    'background_url' => $output[0]
+                ]);
+
+                // Check if we can proceed with character composition
+                $this->checkAndStartCharacterComposition($targetPanel, $targetState);
+            } elseif ($status === 'failed') {
+                // Update panel state with error
+                $this->stateManager->updatePanelState($targetPanel, [
+                    'status' => StateManager::PANEL_STATE_FAILED,
+                    'error' => $error ?? 'Background generation failed',
+                    'failed_at' => time()
+                ]);
+
+                $this->logger->error('Panel background generation failed', [
+                    'panel_id' => $targetPanel,
+                    'prediction_id' => $predictionId,
+                    'error' => $error
+                ]);
+            }
+
+            // Get updated state and map for frontend
+            if (isset($targetState['strip_id'])) {
+                $stripState = $this->stateManager->getStripState($targetState['strip_id']);
+                if ($stripState) {
+                    // Map state for frontend response
+                    $apiState = $this->stateManager->mapStateForApi($stripState);
+
+                    $this->logger->info('Strip state updated', [
+                        'strip_id' => $targetState['strip_id'],
+                        'status' => $apiState['status'],
+                        'progress' => $apiState['progress'],
+                        'current_operation' => $apiState['current_operation']
+                    ]);
+                }
+            }
+        } finally {
+            // Always release the lock
+            flock($lockFp, LOCK_UN);
+            fclose($lockFp);
+            @unlink($lockFile);
+        }
+    }
+
+    private function handleCartoonifySuccess(string $stripId, string $characterId, string $outputUrl, array $pendingData): void
+    {
+        // Generate unique filename for cartoonified image
+        $originalFilename = $pendingData['image_path'] ?? uniqid();
+        $filename = 'cartoonified_' . $originalFilename;
+        $outputPath = rtrim($this->config->getOutputPath(), '/') . '/' . $filename;
+
+        try {
+            // Download and save image
+            $imageContent = file_get_contents($outputUrl);
+            if ($imageContent === false) {
+                throw new Exception('Failed to download cartoonified image');
+            }
+
+            if (file_put_contents($outputPath, $imageContent) === false) {
+                throw new Exception('Failed to save cartoonified image');
+            }
+
+            // Set proper permissions
+            chmod($outputPath, 0644);
+            if (function_exists('posix_getpwuid')) {
+                chown($outputPath, 'www-data');
+                chgrp($outputPath, 'www-data');
+            }
+
+            // Update character state
+            $generatedPath = basename($this->config->getOutputPath());
+            $localUrl = rtrim($this->config->getBaseUrl(), '/') . '/' . $generatedPath . '/' . $filename;
+
+            $stripState = $this->stateManager->updateStripState($stripId, [
+                'characters' => [
+                    $characterId => [
+                        'id' => $characterId,
+                        'image_url' => $localUrl,
+                        'cartoonified_image' => $localUrl,
+                        'status' => 'completed'
+                    ]
+                ]
+            ]);
+
+            // Check if all characters are completed and proceed with panel generation
+            $this->checkAndStartPanelGeneration($stripId, $stripState);
         } catch (Exception $e) {
-            $this->logger->error('Webhook error', [
-                'error' => $e->getMessage()
-            ]);
-            http_response_code(500);
-            echo json_encode([
-                'success' => false,
-                'error' => $e->getMessage()
-            ]);
+            $this->handleCartoonifyFailure($stripId, $characterId, $e->getMessage());
+            throw $e;
+        }
+    }
+
+    private function handleCartoonifyFailure(string $stripId, string $characterId, string $error): void
+    {
+        $this->stateManager->updateStripState($stripId, [
+            'characters' => [
+                $characterId => [
+                    'id' => $characterId,
+                    'status' => 'failed',
+                    'error' => $error
+                ]
+            ]
+        ]);
+    }
+
+    private function getStripStateWithRetry(string $stripId): array
+    {
+        $maxRetries = 3;
+        $retryDelay = 2;
+
+        for ($attempt = 0; $attempt <= $maxRetries; $attempt++) {
+            $stripState = $this->stateManager->getStripState($stripId);
+            if ($stripState) {
+                return $stripState;
+            }
+            if ($attempt < $maxRetries) {
+                $this->logger->info("Strip state not found, retrying...", [
+                    'strip_id' => $stripId,
+                    'attempt' => $attempt + 1
+                ]);
+                sleep($retryDelay);
+            }
+        }
+
+        // Create initial state if not found
+        return [
+            'id' => $stripId,
+            'status' => StateManager::STATE_CHARACTERS_PENDING,
+            'characters' => [],
+            'progress' => 0,
+            'created_at' => time()
+        ];
+    }
+
+    private function checkAndStartPanelGeneration(string $stripId, array $stripState): void
+    {
+        $totalCharacters = count($stripState['characters']);
+        $completedCharacters = count(array_filter(
+            $stripState['characters'],
+            fn($char) => $char['status'] === 'completed'
+        ));
+
+        if ($completedCharacters === $totalCharacters) {
+            if (
+                $stripState['status'] === StateManager::STATE_CHARACTERS_PENDING ||
+                $stripState['status'] === StateManager::STATE_CHARACTERS_PROCESSING
+            ) {
+                try {
+                    // Update to characters complete
+                    $this->stateManager->updateStripState($stripId, [
+                        'status' => StateManager::STATE_CHARACTERS_COMPLETE
+                    ]);
+
+                    // Move to story segmenting
+                    $this->stateManager->updateStripState($stripId, [
+                        'status' => StateManager::STATE_STORY_SEGMENTING
+                    ]);
+
+                    // Initialize dependencies properly
+                    $imageComposer = new ImageComposer($this->logger, $this->config);
+                    $characterProcessor = new CharacterProcessor($this->logger, $this->config);
+                    $storyParser = new StoryParser($this->logger);
+
+                    // Start panel generation
+                    $comicGenerator = new ComicGenerator(
+                        $this->stateManager,
+                        $this->logger,
+                        $this->config,
+                        $imageComposer,
+                        $characterProcessor,
+                        $storyParser
+                    );
+                    $comicGenerator->startPanelGeneration($stripId);
+                } catch (Exception $e) {
+                    $this->logger->error('Failed to start panel generation', [
+                        'strip_id' => $stripId,
+                        'error' => $e->getMessage()
+                    ]);
+                    $this->stateManager->updateStripState($stripId, [
+                        'status' => StateManager::STATE_FAILED,
+                        'error' => 'Failed to start panel generation: ' . $e->getMessage()
+                    ]);
+                }
+            }
+        }
+    }
+
+    private function checkAndStartCharacterComposition(string $panelId, array $panelState): void
+    {
+        if (!isset($panelState['strip_id'])) {
+            throw new Exception('Panel state missing strip ID');
+        }
+
+        $stripState = $this->stateManager->getStripState($panelState['strip_id']);
+        if (!$stripState) {
+            throw new Exception('Strip state not found');
+        }
+
+        // Start character composition if all characters are ready
+        $allCharactersReady = true;
+        foreach ($stripState['characters'] as $character) {
+            if ($character['status'] !== 'completed') {
+                $allCharactersReady = false;
+                break;
+            }
+        }
+
+        if ($allCharactersReady) {
+            try {
+                // Initialize ImageComposer with proper dependencies
+                $imageComposer = new ImageComposer($this->logger, $this->config);
+                $composedPath = $imageComposer->composePanelImage(
+                    $stripState['characters'],
+                    $panelState['description'],
+                    $panelState['options'] ?? []
+                );
+
+                $this->stateManager->updatePanelState($panelId, [
+                    'status' => 'completed',
+                    'output_path' => $composedPath,
+                    'completed_at' => time()
+                ]);
+            } catch (Exception $e) {
+                $this->stateManager->updatePanelState($panelId, [
+                    'status' => 'failed',
+                    'error' => 'Character composition failed: ' . $e->getMessage(),
+                    'failed_at' => time()
+                ]);
+                throw $e;
+            }
         }
     }
 }

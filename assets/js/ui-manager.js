@@ -75,12 +75,38 @@ export const UIManager = {
     },
 
     updateDebugInfo(info) {
-        $('#debugInfo').html(`
-            <p>Generating comic strip...</p>
-            <p>Strip ID: ${info.stripId}</p>
-            <p>Progress: ${info.completedPanels}/${info.totalPanels} panels completed</p>
-            <p>Status: ${info.status}</p>
-        `);
+        const debugHtml = `
+            <div class="debug-info p-3 border rounded mb-3">
+                <h5>Comic Generation Status</h5>
+                <div class="debug-section">
+                    <p><strong>Strip ID:</strong> ${info.stripId}</p>
+                    <p><strong>Status:</strong> ${info.status}</p>
+                    <p><strong>Last Update:</strong> ${info.last_update}</p>
+                    <p><strong>Current Operation:</strong> ${info.current_operation}</p>
+                </div>
+                
+                <div class="debug-section mt-3">
+                    <h6>Progress</h6>
+                    <p><strong>Characters:</strong> ${info.characters}</p>
+                    <p><strong>Panels:</strong> ${info.panels}</p>
+                </div>
+
+                ${info.state_history.length > 0 ? `
+                    <div class="debug-section mt-3">
+                        <h6>State History</h6>
+                        <div class="small" style="max-height: 100px; overflow-y: auto;">
+                            ${info.state_history.map(state => `
+                                <div class="debug-history-item">
+                                    <small>${state.timestamp}: ${state.state} - ${state.message || 'No message'}</small>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                ` : ''}
+            </div>
+        `;
+
+        $('#debugInfo').html(debugHtml);
     },
 
     showCompletionState() {

@@ -10,16 +10,26 @@ class Config
 
     public function __construct()
     {
-        // Load environment variables if not already loaded
-        if (empty($_ENV)) {
-            EnvLoader::load(__DIR__ . '/../.env');
-        }
+        // Force environment reload
+        $this->loadEnv();
 
         // Store environment variables
         $this->env = $_ENV;
 
         // Load configuration file
         $this->config = require __DIR__ . '/../config/config.php';
+
+        // Override config with environment variables
+        $this->loadConfig();
+
+        // Debug environment loading
+        error_log("DEBUG_VERIFY - Config initialized: " . json_encode([
+            'env_log_level' => $this->getEnv('LOG_LEVEL'),
+            'env_app_log_level' => $this->getEnv('APP_LOG_LEVEL'),
+            'env_app_debug' => $this->getEnv('APP_DEBUG'),
+            'config_debug' => $this->isDebugMode(),
+            'config_log_level' => $this->getLogLevel()
+        ]));
     }
 
     private function loadEnv(): void

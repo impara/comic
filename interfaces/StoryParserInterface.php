@@ -16,15 +16,17 @@ interface StoryParserInterface
      * Validates and processes panel descriptions for consistency
      * 
      * @param array $panels Array of panel descriptions
+     * @param array $options Processing options
      * @return array Processed panel descriptions
      */
-    public function processPanelDescriptions(array $panels): array;
+    public function processPanelDescriptions(array $panels, array $options = []): array;
 
     /**
      * Gets the optimal number of panels for a story
      * 
      * @param string $story The story to analyze
+     * @param array $options Analysis options
      * @return int Recommended number of panels
      */
-    public function getOptimalPanelCount(string $story): int;
+    public function getOptimalPanelCount(string $story, array $options = []): int;
 }

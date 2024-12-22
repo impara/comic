@@ -24,19 +24,22 @@ return [
         'webhook_secret' => getenv('REPLICATE_WEBHOOK_SECRET'),
         'models' => [
             'sdxl' => [
-                'version' => '39ed52f2a78e934b3ba6e2a89f5b1c712de7dfea535525255b1aa35c5565e08b',
+                'version' => 'a00d0b7dcbb9c3fbb34ba87d2d5b46c56969c84a628bf778a7fdaec30b1b99c5',
                 'params' => [
                     'prompt' => null,
                     'negative_prompt' => null,
-                    'num_inference_steps' => 75,
-                    'guidance_scale' => 15.0,
+                    'num_outputs' => 1,
+                    'num_inference_steps' => 50,
+                    'guidance_scale' => 7.5,
                     'width' => 1024,
                     'height' => 1024,
-                    'strength' => 0.45,
-                    'high_noise_frac' => 0.9,
-                    'prompt_2' => null,
-                    'guidance_scale_2' => 12.0,
-                    'scheduler' => "DDIM"
+                    'scheduler' => "DPM++ 2M Karras",
+                    'refine' => "expert_ensemble_refiner",
+                    'high_noise_frac' => 0.8,
+                    'refine_steps' => 25,
+                    'prompt_strength' => 0.8,
+                    'apply_watermark' => false,
+                    'lora_scale' => 0.6
                 ]
             ],
             'txt2img' => [
