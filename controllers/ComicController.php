@@ -49,12 +49,8 @@ class ComicController
                 throw new Exception('Background is required');
             }
 
-            $result = $this->handleGenerateRequest($input);
-
-            return [
-                'success' => true,
-                'data' => $result
-            ];
+            // Return result directly without wrapping
+            return $this->handleGenerateRequest($input);
         } catch (Exception $e) {
             $this->logger->error('Request handling failed', [
                 'error' => $e->getMessage(),
@@ -96,10 +92,8 @@ class ComicController
                 $options
             );
 
-            return [
-                'success' => true,
-                'data' => $result
-            ];
+            // Return result directly without additional nesting
+            return $result;
         } catch (Exception $e) {
             $this->logger->error('Comic generation failed', [
                 'error' => $e->getMessage()

@@ -63,12 +63,14 @@ class ComicGenerator
 
             $this->stateManager->updateStripState($stripId, $stripState);
 
+            // Return success response with strip ID
             return [
                 'success' => true,
                 'data' => [
                     'id' => $stripId,
                     'status' => 'processing',
-                    'message' => 'Comic generation started'
+                    'message' => 'Comic generation started',
+                    'characters' => $processedCharacters
                 ]
             ];
         } catch (Exception $e) {

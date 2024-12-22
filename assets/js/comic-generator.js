@@ -39,6 +39,9 @@ export const ComicGenerator = {
             if (result.data && result.data.id) {
                 this.stripId = result.data.id;
                 this.uiManager.showGeneratingState();
+
+                // Add a small delay before starting polling to ensure state file is written
+                await new Promise(resolve => setTimeout(resolve, 1000));
                 this.startPolling();
                 return;
             }
@@ -61,6 +64,7 @@ export const ComicGenerator = {
         const startTime = Date.now();
         let consecutiveErrors = 0;
         let warningShown = false;
+        let initialDelay = true;
 
         this.pollInterval = setInterval(async () => {
             try {
@@ -88,6 +92,14 @@ export const ComicGenerator = {
                 }
 
                 const state = await response.json();
+
+                // Handle case where state file might not be ready yet
+                if (!state && initialDelay) {
+                    console.log('State file not ready yet, waiting...');
+                    return;
+                }
+                initialDelay = false;
+
                 console.log('Comic generation status:', state);
 
                 // Reset error counter on successful response
