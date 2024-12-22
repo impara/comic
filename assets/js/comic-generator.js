@@ -35,9 +35,9 @@ export const ComicGenerator = {
                 throw new Error(result.error || 'Comic generation failed');
             }
 
-            // If we have a strip ID, consider it a success even if processing hasn't started
-            if (result.id) {
-                this.stripId = result.id;
+            // If we have a strip ID in the data object, consider it a success even if processing hasn't started
+            if (result.data && result.data.id) {
+                this.stripId = result.data.id;
                 this.uiManager.showGeneratingState();
                 this.startPolling();
                 return;
@@ -117,13 +117,20 @@ export const ComicGenerator = {
                     this.handleError(state.error || 'Comic generation failed');
                 }
             } catch (error) {
-                console.error('Status polling error:', error);
                 consecutiveErrors++;
+                console.error('Error checking status:', error);
 
-                // Stop polling after 3 consecutive errors
+                // Update UI with error info
+                this.uiManager.updateDebugInfo({
+                    stripId: this.stripId,
+                    status: 'error',
+                    message: `Error checking status (attempt ${consecutiveErrors}/3): ${error.message}`
+                });
+
                 if (consecutiveErrors >= 3) {
                     this.stopPolling();
-                    this.handleError('Failed to check generation status after multiple attempts');
+                    this.handleError('Failed to check comic generation status');
+                    return;
                 }
             }
         }, 2000);
@@ -146,15 +153,32 @@ export const ComicGenerator = {
                 .filter(c => c.status === 'completed').length;
             const processingCharacters = Object.values(state.characters)
                 .filter(c => c.status === 'processing').length;
+            const failedCharacters = Object.values(state.characters)
+                .filter(c => c.status === 'failed');
 
-            // Show more detailed status information
+            // Build detailed status message
+            let statusMessage = `${completedCharacters}/${totalCharacters} characters completed`;
+            if (processingCharacters > 0) {
+                statusMessage += `, ${processingCharacters} processing`;
+            }
+            if (failedCharacters.length > 0) {
+                statusMessage += `, ${failedCharacters.length} failed`;
+            }
+
+            // Include error details if any
+            const errorDetails = failedCharacters
+                .map(char => `${char.id}: ${char.error || 'Unknown error'}`)
+                .join('; ');
+
             this.uiManager.updateDebugInfo({
                 stripId: this.stripId,
                 totalCharacters,
                 completedCharacters,
                 processingCharacters,
+                failedCharacters: failedCharacters.length,
                 status: state.status,
-                progress: `${completedCharacters}/${totalCharacters} characters completed`
+                progress: statusMessage,
+                errors: errorDetails || undefined
             });
         }
     },
@@ -163,10 +187,11 @@ export const ComicGenerator = {
         this.stopPolling();
         this.uiManager.showCompletionState();
 
-        if (state.output_path) {
-            this.uiManager.displayResult(state.output_path);
+        const outputUrl = state.output_path || state.output_url;
+        if (outputUrl) {
+            this.uiManager.displayResult(outputUrl);
         } else {
-            console.warn('No output path in completion state:', state);
+            console.warn('No output URL in completion state:', state);
             this.handleError('Comic generation completed but no output URL found');
         }
     },
