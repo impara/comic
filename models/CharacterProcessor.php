@@ -97,42 +97,58 @@ class CharacterProcessor
 
         // Generate a unique filename
         $filename = 'generatedcharacter_' . uniqid() . '.png';
-        $outputPath = $this->config->getOutputPath();
-        $generatedPath = basename($outputPath);
+        $outputPath = rtrim($this->config->getOutputPath(), '/'); // Full filesystem path
+        $generatedPath = 'generated'; // URL path component
+
+        // Log the paths for debugging
+        $this->logger->info('Path configuration', [
+            'output_path' => $outputPath,
+            'generated_path' => $generatedPath,
+            'full_path' => $outputPath . '/' . $filename
+        ]);
 
         // Ensure output directory exists and has correct permissions
         if (!is_dir($outputPath)) {
             if (!mkdir($outputPath, 0755, true)) {
                 throw new Exception('Failed to create output directory');
             }
-            // Set www-data as owner
             chown($outputPath, 'www-data');
             chgrp($outputPath, 'www-data');
         }
 
-        $path = $outputPath . '/' . $filename;  // Add forward slash to properly join path
+        $path = $outputPath . '/' . $filename;
 
         if (!file_put_contents($path, $imageData)) {
             throw new Exception('Failed to save image');
         }
 
-        // Set proper permissions for the saved file
         chmod($path, 0644);
         chown($path, 'www-data');
         chgrp($path, 'www-data');
 
-        // Log the file details
+        // Construct URL with consistent path
+        $url = rtrim($this->config->getBaseUrl(), '/') . '/' . $generatedPath . '/' . $filename;
+
+        // Verify file exists and is accessible
+        if (!file_exists($path)) {
+            throw new Exception('File was not created successfully');
+        }
+
+        // Log detailed file information
         $this->logger->info('Saved character image', [
             'path' => $path,
             'filename' => $filename,
-            'url' => rtrim($this->config->getBaseUrl(), '/') . '/' . $generatedPath . '/' . $filename,
-            'permissions' => substr(sprintf('%o', fileperms($path)), -4)
+            'url' => $url,
+            'exists' => file_exists($path),
+            'permissions' => substr(sprintf('%o', fileperms($path)), -4),
+            'owner' => posix_getpwuid(fileowner($path))['name'],
+            'group' => posix_getgrgid(filegroup($path))['name']
         ]);
 
         return [
             'path' => $path,
             'filename' => $filename,
-            'url' => rtrim($this->config->getBaseUrl(), '/') . '/' . $generatedPath . '/' . $filename
+            'url' => $url
         ];
     }
 
