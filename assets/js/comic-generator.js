@@ -5,17 +5,8 @@ export const ComicGenerator = {
         this.stripId = null;
         this.pollInterval = null;
         this.uiManager = UIManager;
-
-        // Bind methods
-        this.handleGenerationStart = this.handleGenerationStart.bind(this);
-        this.handleGenerationError = this.handleGenerationError.bind(this);
-        this.checkProgress = this.checkProgress.bind(this);
-        this.handleCompletion = this.handleCompletion.bind(this);
     },
 
-    /**
-     * Start comic strip generation
-     */
     async generateStrip(story, characters, options = {}) {
         try {
             const response = await fetch('/api.php', {
@@ -33,115 +24,66 @@ export const ComicGenerator = {
                 })
             });
 
-            // First check if response is ok
             if (!response.ok) {
-                const errorText = await response.text();
-                console.error('Server error response:', errorText);
                 throw new Error(`Server error: ${response.status}`);
             }
 
-            // Then try to parse JSON
-            let result;
-            try {
-                result = await response.json();
-            } catch (parseError) {
-                console.error('JSON parse error:', parseError);
-                throw new Error('Invalid response format from server');
-            }
-
-            if (result.success) {
-                this.handleGenerationStart(result.data);
+            const result = await response.json();
+            if (result.success && result.data.id) {
+                this.stripId = result.data.id;
+                this.uiManager.showGeneratingState();
+                this.startPolling();
             } else {
-                // Handle error from backend
-                this.handleGenerationError(result.error || 'An unexpected error occurred');
+                throw new Error(result.error || 'Failed to start comic generation');
             }
         } catch (error) {
             console.error('Comic generation error:', error);
-            this.handleGenerationError(error.message || 'Failed to connect to the server. Please try again.');
+            this.handleError(error.message);
         }
     },
 
-    /**
-     * Handle successful generation start
-     */
-    handleGenerationStart(data) {
-        this.stripId = data.id;
-        this.uiManager.showGeneratingState();
-        this.startProgressPolling();
-    },
-
-    /**
-     * Handle generation error
-     */
-    handleGenerationError(message) {
-        console.error('Generation error:', message);
-        this.stopProgressPolling();
-        if (this.uiManager) {
-            this.uiManager.showError(message);
-        } else {
-            console.error('UIManager not initialized');
-            alert(message); // Fallback if UIManager is not available
-        }
-    },
-
-    /**
-     * Start polling for progress updates
-     */
-    startProgressPolling() {
+    startPolling() {
         if (this.pollInterval) {
             clearInterval(this.pollInterval);
         }
 
-        this.pollInterval = setInterval(this.checkProgress, 1000);
+        this.pollInterval = setInterval(async () => {
+            try {
+                const response = await fetch(`/api.php?action=status&id=${this.stripId}`);
+                if (!response.ok) {
+                    throw new Error('Failed to fetch status');
+                }
+
+                const state = await response.json();
+                console.log('Comic generation status:', state);
+
+                // Update UI with progress
+                this.updateProgress(state);
+
+                // Check if processing is complete
+                if (state.status === 'completed') {
+                    this.handleCompletion(state);
+                } else if (state.status === 'failed') {
+                    this.handleError(state.error || 'Comic generation failed');
+                }
+            } catch (error) {
+                console.error('Status polling error:', error);
+                this.handleError('Failed to check generation status');
+            }
+        }, 2000);
     },
 
-    /**
-     * Stop progress polling
-     */
-    stopProgressPolling() {
+    stopPolling() {
         if (this.pollInterval) {
             clearInterval(this.pollInterval);
             this.pollInterval = null;
         }
     },
 
-    /**
-     * Check generation progress
-     */
-    async checkProgress() {
-        if (!this.stripId) return;
-
-        try {
-            const response = await fetch(`/api.php?action=status&id=${this.stripId}`);
-            const state = await response.json();
-
-            if (!state || typeof state !== 'object') {
-                throw new Error('Invalid state format received');
-            }
-
-            // Update UI with progress
-            this.updateProgress(state);
-
-            // Check completion
-            if (state.status === 'completed') {
-                this.handleCompletion(state);
-            } else if (state.status === 'failed') {
-                this.handleGenerationError(state.error || 'Generation failed');
-            }
-        } catch (error) {
-            this.handleGenerationError(error.message);
-        }
-    },
-
-    /**
-     * Update progress UI
-     */
     updateProgress(state) {
-        // Update progress bar
         const progress = state.progress || 0;
         this.uiManager.updateProgress(progress);
 
-        // Update debug info if available
         if (state.characters) {
             const totalCharacters = Object.keys(state.characters).length;
             const completedCharacters = Object.values(state.characters)
@@ -156,17 +98,20 @@ export const ComicGenerator = {
         }
     },
 
-    /**
-     * Handle successful completion
-     */
     handleCompletion(state) {
-        this.stopProgressPolling();
+        this.stopPolling();
         this.uiManager.showCompletionState();
 
         if (state.output_path) {
             this.uiManager.displayResult(state.output_path);
         } else {
             console.warn('No output path in completion state:', state);
+            this.handleError('Comic generation completed but no output URL found');
         }
+    },
+
+    handleError(error) {
+        this.stopPolling();
+        this.uiManager.showError(error);
     }
 }; 

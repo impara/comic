@@ -85,12 +85,6 @@ const FormHandler = {
             const characterData = JSON.parse(sessionStorage.getItem('characterData') || '{}');
 
             if (!userStory || !selectedStyle || !this.selectedCharacters.length || !selectedBackground) {
-                console.error('Missing required data:', {
-                    hasStory: !!userStory,
-                    hasStyle: !!selectedStyle,
-                    characterCount: this.selectedCharacters.length,
-                    hasBackground: !!selectedBackground
-                });
                 UIManager.showError('Please complete all required steps before generating the comic.');
                 return;
             }
@@ -102,10 +96,7 @@ const FormHandler = {
             // Prepare character data
             const characters = this.selectedCharacters.map(id => {
                 const char = characterData[id];
-                if (!char) {
-                    console.error('Character not found:', id);
-                    return null;
-                }
+                if (!char) return null;
                 return {
                     id: char.id,
                     name: char.name,
@@ -120,43 +111,24 @@ const FormHandler = {
                 };
             }).filter(Boolean);
 
-            // Validate we have valid characters
             if (characters.length === 0) {
                 UIManager.showError('No valid characters selected. Please select at least one character.');
                 return;
             }
-
-            // Get the form data and pass it directly to generate comic
-            const formData = {
-                characters: characters,
-                story: userStory,
-                style: selectedStyle,
-                background: selectedBackground,
-                metadata: {
-                    created_at: new Date().toISOString(),
-                    version: '1.0.2'
-                }
-            };
-
-            // Enhanced logging
-            console.log('Comic generation data:', {
-                characters: characters.length,  // Log the actual array length
-                storyLength: userStory.length,
-                style: selectedStyle,
-                background: selectedBackground,
-                characterData: characterData  // Log the full character data for debugging
-            });
 
             // Initialize ComicGenerator if not already initialized
             if (!ComicGenerator.uiManager) {
                 ComicGenerator.init();
             }
 
-            // Call generateStrip with the form data
-            ComicGenerator.generateStrip(formData.story, formData.characters, {
-                style: formData.style,
-                background: formData.background,
-                metadata: formData.metadata
+            // Generate the comic
+            ComicGenerator.generateStrip(userStory, characters, {
+                style: selectedStyle,
+                background: selectedBackground,
+                metadata: {
+                    created_at: new Date().toISOString(),
+                    version: this.version
+                }
             });
         });
 
@@ -1192,6 +1164,34 @@ const FormHandler = {
     validateStep3() {
         // Add any step 3 validation logic here
         return true;
+    },
+
+    async generateComic() {
+        try {
+            const response = await fetch('/api.php', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    story: this.story,
+                    characters: this.selectedCharacters,
+                    style: this.selectedStyle,
+                    background: this.selectedBackground
+                })
+            });
+
+            const result = await response.json();
+            if (result.success && result.data.id) {
+                // Start polling for updates
+                this.comicGenerator.startPolling(result.data.id);
+            } else {
+                throw new Error(result.error || 'Failed to start comic generation');
+            }
+        } catch (error) {
+            console.error('Comic generation error:', error);
+            this.handleError(error.message);
+        }
     }
 };
 

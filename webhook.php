@@ -69,8 +69,9 @@ class WebhookHandler
                 ]);
 
                 // Generate unique filename for cartoonified image
-                $filename = 'cartoonified_' . basename($pendingData['image_path']);
-                $outputPath = $this->config->getOutputPath() . '/' . $filename;
+                $originalFilename = $pendingData['image_path'] ?? uniqid();
+                $filename = 'cartoonified_' . $originalFilename;
+                $outputPath = rtrim($this->config->getOutputPath(), '/') . '/' . $filename;
 
                 try {
                     $imageContent = file_get_contents($output);
