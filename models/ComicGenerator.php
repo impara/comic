@@ -108,7 +108,10 @@ class ComicGenerator
     public function startPanelGeneration(string $stripId): void
     {
         try {
-            $this->logger->info('Starting panel generation', ['strip_id' => $stripId]);
+            $this->logger->info('Starting panel generation', [
+                'strip_id' => $stripId,
+                'timestamp' => date('Y-m-d H:i:s')
+            ]);
 
             // Get strip state
             $stripState = $this->stateManager->getStripState($stripId);
@@ -120,7 +123,8 @@ class ComicGenerator
                 'strip_id' => $stripId,
                 'status' => $stripState['status'],
                 'has_characters' => isset($stripState['characters']),
-                'character_count' => count($stripState['characters'] ?? [])
+                'character_count' => count($stripState['characters'] ?? []),
+                'current_state' => $stripState
             ]);
 
             // Get story and options from state
@@ -134,14 +138,25 @@ class ComicGenerator
             $this->logger->debug('Starting story segmentation', [
                 'strip_id' => $stripId,
                 'story_length' => strlen($story),
-                'options' => array_keys($options)
+                'story_content' => $story,
+                'options' => $options
             ]);
 
             // Segment story into panels
             $segments = $this->storyParser->segmentStory($story, [
                 'style' => $options['style'] ?? 'default',
-                'panel_count' => 4,
+                'panel_count' => $options['panel_count'] ?? 4,
                 'characters' => $stripState['characters'] ?? []
+            ]);
+
+            $this->logger->debug('Story segmented into panels', [
+                'strip_id' => $stripId,
+                'segment_count' => count($segments),
+                'segments' => array_map(fn($s, $i) => [
+                    'index' => $i,
+                    'length' => strlen($s),
+                    'content' => $s
+                ], $segments, array_keys($segments))
             ]);
 
             // Process panel descriptions
@@ -152,30 +167,37 @@ class ComicGenerator
             $this->logger->info('Story segmented into panels', [
                 'strip_id' => $stripId,
                 'panel_count' => count($segments),
-                'segments' => array_map(fn($s) => strlen($s), $segments)
+                'segments' => array_map(fn($s, $i) => [
+                    'index' => $i,
+                    'length' => strlen($s),
+                    'content' => $s
+                ], $segments, array_keys($segments))
             ]);
 
             // Update state to panels generating
             $this->stateManager->updateStripState($stripId, [
-                'status' => StateManager::STATE_PANELS_GENERATING
+                'status' => StateManager::STATE_PANELS_GENERATING,
+                'total_panels' => count($segments)
             ]);
 
             // Initialize and generate each panel
             $generatedPanels = [];
             foreach ($segments as $index => $segment) {
-                $panelId = uniqid('panel_');
+                $panelId = 'panel_' . uniqid();
 
                 $this->logger->debug('Initializing panel', [
                     'strip_id' => $stripId,
                     'panel_id' => $panelId,
                     'index' => $index,
-                    'segment_length' => strlen($segment)
+                    'segment_length' => strlen($segment),
+                    'segment_content' => $segment
                 ]);
 
                 // Initialize panel
                 $this->stateManager->initializePanel($stripId, $panelId, $segment, [
                     'panel_index' => $index,
-                    'style' => $options['style'] ?? 'default'
+                    'style' => $options['style'] ?? 'default',
+                    'characters' => $stripState['characters'] ?? []
                 ]);
 
                 // Generate panel
@@ -188,11 +210,12 @@ class ComicGenerator
                     );
                     $generatedPanels[] = $generatedPanel;
 
-                    $this->logger->info('Panel generated successfully', [
+                    $this->logger->info('Panel generation initiated', [
                         'strip_id' => $stripId,
                         'panel_id' => $panelId,
                         'index' => $index,
-                        'status' => $generatedPanel['status']
+                        'status' => $generatedPanel['status'],
+                        'prediction_id' => $generatedPanel['prediction_id'] ?? null
                     ]);
                 } catch (Exception $e) {
                     $this->logger->error('Failed to generate panel', [
@@ -210,46 +233,28 @@ class ComicGenerator
                 throw new Exception('No panels were generated successfully');
             }
 
-            $this->logger->debug('All panels generated, updating state', [
+            $this->logger->debug('All panels initialized', [
                 'strip_id' => $stripId,
                 'panel_count' => count($generatedPanels),
-                'panel_statuses' => array_map(fn($p) => $p['status'], $generatedPanels)
+                'panels' => array_map(fn($p) => [
+                    'id' => $p['id'],
+                    'status' => $p['status'],
+                    'prediction_id' => $p['prediction_id'] ?? null
+                ], $generatedPanels)
             ]);
 
-            // Update state to composing
+            // Update state with panels
             $this->stateManager->updateStripState($stripId, [
-                'status' => StateManager::STATE_PANELS_COMPOSING,
-                'panels' => $generatedPanels
+                'status' => StateManager::STATE_PANELS_GENERATING,
+                'panels' => $generatedPanels,
+                'panel_count' => count($generatedPanels),
+                'updated_at' => time()
             ]);
 
-            // Get panel output paths
-            $panelPaths = array_map(function ($panel) {
-                return $panel['output'] ?? null;
-            }, $generatedPanels);
-
-            // Filter out any null values
-            $panelPaths = array_filter($panelPaths);
-
-            if (empty($panelPaths)) {
-                throw new Exception('No valid panel outputs found');
-            }
-
-            $this->logger->debug('Starting panel composition', [
+            $this->logger->info('Panel generation process started', [
                 'strip_id' => $stripId,
-                'panel_count' => count($panelPaths)
-            ]);
-
-            // Start composing panels
-            $this->imageComposer->composeStrip($panelPaths, $stripId);
-
-            // Update state to complete
-            $this->stateManager->updateStripState($stripId, [
-                'status' => StateManager::STATE_COMPLETE
-            ]);
-
-            $this->logger->info('Comic strip completed', [
-                'strip_id' => $stripId,
-                'panel_count' => count($panelPaths)
+                'panel_count' => count($generatedPanels),
+                'current_state' => $this->stateManager->getStripState($stripId)
             ]);
         } catch (Exception $e) {
             $this->logger->error('Failed to start panel generation', [
@@ -261,7 +266,8 @@ class ComicGenerator
             // Update state to failed
             $this->stateManager->updateStripState($stripId, [
                 'status' => StateManager::STATE_FAILED,
-                'error' => 'Failed to generate panels: ' . $e->getMessage()
+                'error' => 'Failed to generate panels: ' . $e->getMessage(),
+                'failed_at' => time()
             ]);
 
             throw $e;

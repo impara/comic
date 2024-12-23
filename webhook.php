@@ -281,7 +281,8 @@ class WebhookHandler
             'has_error' => !empty($error),
             'raw_output' => $output,
             'raw_error' => $error,
-            'timestamp' => date('Y-m-d H:i:s')
+            'timestamp' => date('Y-m-d H:i:s'),
+            'payload' => $payload
         ]);
 
         // Find associated panel state
@@ -291,7 +292,12 @@ class WebhookHandler
             'prediction_id' => $predictionId,
             'total_panel_states' => count($panelStates),
             'temp_path' => $this->config->get('paths.temp'),
-            'panel_state_files' => $panelStates
+            'panel_state_files' => array_map(fn($path) => [
+                'path' => $path,
+                'exists' => file_exists($path),
+                'size' => file_exists($path) ? filesize($path) : 0,
+                'content' => file_exists($path) ? json_decode(file_get_contents($path), true) : null
+            ], $panelStates)
         ]);
 
         $targetPanel = null;
@@ -463,7 +469,7 @@ class WebhookHandler
     private function handleCartoonifySuccess(string $stripId, string $characterId, string $outputUrl, array $pendingData): void
     {
         // Generate unique filename for cartoonified image
-        $originalFilename = $pendingData['image_path'] ?? uniqid();
+        $originalFilename = $pendingData['image_path'] ?? uniqid() . '.png';
         $filename = 'cartoonified_' . $originalFilename;
         $outputPath = rtrim($this->config->getOutputPath(), '/') . '/' . $filename;
 
