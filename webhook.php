@@ -137,6 +137,11 @@ class WebhookHandler
         $lockFp = fopen($lockFile, 'c+');
 
         if (!$lockFp) {
+            $this->logger->error('Failed to create webhook lock file', [
+                'prediction_id' => $predictionId,
+                'lock_file' => $lockFile,
+                'error' => error_get_last()
+            ]);
             throw new Exception("Could not create webhook lock file");
         }
 
@@ -150,33 +155,78 @@ class WebhookHandler
                 usleep(250000); // Wait 250ms before retrying
             }
 
+            $this->logger->debug('Acquired webhook lock', [
+                'prediction_id' => $predictionId,
+                'lock_file' => $lockFile,
+                'time_taken' => time() - $startTime
+            ]);
+
             // Get pending file data
             $pendingFile = $this->config->getTempPath() . "pending_{$predictionId}.json";
             if (!file_exists($pendingFile)) {
+                $this->logger->error('Pending file not found', [
+                    'prediction_id' => $predictionId,
+                    'pending_file' => $pendingFile,
+                    'temp_path' => $this->config->getTempPath(),
+                    'existing_files' => glob($this->config->getTempPath() . "pending_*.json")
+                ]);
                 throw new Exception('Pending file not found');
             }
 
             $pendingData = json_decode(file_get_contents($pendingFile), true);
             if (!$pendingData) {
+                $this->logger->error('Invalid pending data', [
+                    'prediction_id' => $predictionId,
+                    'pending_file' => $pendingFile,
+                    'raw_content' => file_get_contents($pendingFile),
+                    'json_error' => json_last_error_msg()
+                ]);
                 throw new Exception('Invalid pending data');
             }
+
+            $this->logger->debug('Retrieved pending data', [
+                'prediction_id' => $predictionId,
+                'pending_data' => $pendingData
+            ]);
 
             // Extract required data
             $stripId = $pendingData['strip_id'] ?? null;
             $characterId = $pendingData['options']['character_id'] ?? null;
 
             if (!$stripId || !$characterId) {
+                $this->logger->error('Missing required data in pending file', [
+                    'prediction_id' => $predictionId,
+                    'strip_id' => $stripId,
+                    'character_id' => $characterId,
+                    'pending_data' => $pendingData
+                ]);
                 throw new Exception('Missing required data');
             }
 
             if ($status === 'succeeded' && $output) {
+                $this->logger->debug('Processing successful cartoonify result', [
+                    'prediction_id' => $predictionId,
+                    'strip_id' => $stripId,
+                    'character_id' => $characterId,
+                    'output_url' => $output
+                ]);
                 $this->handleCartoonifySuccess($stripId, $characterId, $output, $pendingData);
             } else {
+                $this->logger->debug('Processing failed cartoonify result', [
+                    'prediction_id' => $predictionId,
+                    'strip_id' => $stripId,
+                    'character_id' => $characterId,
+                    'error' => $payload['error'] ?? 'Processing failed'
+                ]);
                 $this->handleCartoonifyFailure($stripId, $characterId, $payload['error'] ?? 'Processing failed');
             }
 
             // Clean up pending file
             if (file_exists($pendingFile)) {
+                $this->logger->debug('Cleaning up pending file', [
+                    'prediction_id' => $predictionId,
+                    'pending_file' => $pendingFile
+                ]);
                 unlink($pendingFile);
             }
 
@@ -186,15 +236,31 @@ class WebhookHandler
                 // Map state for frontend response
                 $apiState = $this->stateManager->mapStateForApi($stripState);
 
-                $this->logger->info('Strip state updated after cartoonify', [
+                $this->logger->debug('Strip state after cartoonify processing', [
                     'strip_id' => $stripId,
                     'status' => $apiState['status'],
                     'progress' => $apiState['progress'],
-                    'current_operation' => $apiState['current_operation']
+                    'current_operation' => $apiState['current_operation'],
+                    'characters' => array_map(fn($char) => [
+                        'id' => $char['id'],
+                        'status' => $char['status']
+                    ], $stripState['characters']),
+                    'panels' => array_map(fn($panel) => [
+                        'id' => $panel['id'],
+                        'status' => $panel['status']
+                    ], $stripState['panels'] ?? [])
+                ]);
+            } else {
+                $this->logger->error('Failed to retrieve strip state after cartoonify', [
+                    'strip_id' => $stripId
                 ]);
             }
         } finally {
             // Always release the lock
+            $this->logger->debug('Releasing webhook lock', [
+                'prediction_id' => $predictionId,
+                'lock_file' => $lockFile
+            ]);
             flock($lockFp, LOCK_UN);
             fclose($lockFp);
             @unlink($lockFile);
@@ -399,24 +465,56 @@ class WebhookHandler
 
     private function checkAndStartPanelGeneration(string $stripId, array $stripState): void
     {
+        $this->logger->debug('Checking panel generation conditions', [
+            'strip_id' => $stripId,
+            'current_status' => $stripState['status'],
+            'total_characters' => count($stripState['characters']),
+            'character_statuses' => array_map(fn($char) => $char['status'], $stripState['characters'])
+        ]);
+
         $totalCharacters = count($stripState['characters']);
         $completedCharacters = count(array_filter(
             $stripState['characters'],
             fn($char) => $char['status'] === 'completed'
         ));
 
+        $this->logger->debug('Character completion status', [
+            'strip_id' => $stripId,
+            'total_characters' => $totalCharacters,
+            'completed_characters' => $completedCharacters,
+            'all_completed' => ($completedCharacters === $totalCharacters)
+        ]);
+
         if ($completedCharacters === $totalCharacters) {
+            $this->logger->debug('All characters completed, checking strip status', [
+                'strip_id' => $stripId,
+                'current_status' => $stripState['status'],
+                'can_proceed' => (
+                    $stripState['status'] === StateManager::STATE_CHARACTERS_PENDING ||
+                    $stripState['status'] === StateManager::STATE_CHARACTERS_PROCESSING
+                )
+            ]);
+
             if (
                 $stripState['status'] === StateManager::STATE_CHARACTERS_PENDING ||
                 $stripState['status'] === StateManager::STATE_CHARACTERS_PROCESSING
             ) {
                 try {
                     // Update to characters complete
+                    $this->logger->debug('Updating strip state to characters complete', [
+                        'strip_id' => $stripId,
+                        'previous_status' => $stripState['status']
+                    ]);
+
                     $this->stateManager->updateStripState($stripId, [
                         'status' => StateManager::STATE_CHARACTERS_COMPLETE
                     ]);
 
                     // Move to story segmenting
+                    $this->logger->debug('Updating strip state to story segmenting', [
+                        'strip_id' => $stripId
+                    ]);
+
                     $this->stateManager->updateStripState($stripId, [
                         'status' => StateManager::STATE_STORY_SEGMENTING
                     ]);
@@ -425,6 +523,15 @@ class WebhookHandler
                     $imageComposer = new ImageComposer($this->logger, $this->config);
                     $characterProcessor = new CharacterProcessor($this->logger, $this->config);
                     $storyParser = new StoryParser($this->logger);
+
+                    $this->logger->debug('Starting panel generation process', [
+                        'strip_id' => $stripId,
+                        'dependencies_initialized' => [
+                            'image_composer' => get_class($imageComposer),
+                            'character_processor' => get_class($characterProcessor),
+                            'story_parser' => get_class($storyParser)
+                        ]
+                    ]);
 
                     // Start panel generation
                     $comicGenerator = new ComicGenerator(
@@ -435,18 +542,44 @@ class WebhookHandler
                         $characterProcessor,
                         $storyParser
                     );
-                    $comicGenerator->startPanelGeneration($stripId);
+
+                    $result = $comicGenerator->startPanelGeneration($stripId);
+
+                    $this->logger->debug('Panel generation started', [
+                        'strip_id' => $stripId,
+                        'result' => $result
+                    ]);
                 } catch (Exception $e) {
                     $this->logger->error('Failed to start panel generation', [
                         'strip_id' => $stripId,
-                        'error' => $e->getMessage()
+                        'error' => $e->getMessage(),
+                        'trace' => $e->getTraceAsString()
                     ]);
                     $this->stateManager->updateStripState($stripId, [
                         'status' => StateManager::STATE_FAILED,
                         'error' => 'Failed to start panel generation: ' . $e->getMessage()
                     ]);
                 }
+            } else {
+                $this->logger->debug('Strip not in correct state for panel generation', [
+                    'strip_id' => $stripId,
+                    'current_status' => $stripState['status'],
+                    'required_status' => [
+                        StateManager::STATE_CHARACTERS_PENDING,
+                        StateManager::STATE_CHARACTERS_PROCESSING
+                    ]
+                ]);
             }
+        } else {
+            $this->logger->debug('Not all characters completed yet', [
+                'strip_id' => $stripId,
+                'completed' => $completedCharacters,
+                'total' => $totalCharacters,
+                'pending_characters' => array_filter(
+                    $stripState['characters'],
+                    fn($char) => $char['status'] !== 'completed'
+                )
+            ]);
         }
     }
 
