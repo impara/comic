@@ -127,6 +127,11 @@ class ComicGenerator
                 'current_state' => $stripState
             ]);
 
+            // Verify we're in the correct state
+            if ($stripState['status'] !== StateManager::STATE_STORY_SEGMENTING) {
+                throw new Exception('Invalid state for panel generation. Expected STATE_STORY_SEGMENTING, got ' . $stripState['status']);
+            }
+
             // Get story and options from state
             $story = $stripState['options']['story'] ?? null;
             $options = $stripState['options'] ?? [];
@@ -177,7 +182,8 @@ class ComicGenerator
             // Update state to panels generating
             $this->stateManager->updateStripState($stripId, [
                 'status' => StateManager::STATE_PANELS_GENERATING,
-                'total_panels' => count($segments)
+                'total_panels' => count($segments),
+                'panels' => [] // Initialize empty panels array
             ]);
 
             // Initialize and generate each panel

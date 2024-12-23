@@ -96,7 +96,7 @@ class CharacterProcessor
         }
 
         // Generate a unique filename
-        $filename = 'generatedcharacter_' . uniqid() . '.png';
+        $filename = 'uploadedcharacter_' . uniqid() . '.png';
         $outputPath = rtrim($this->config->getOutputPath(), '/'); // Full filesystem path
         $generatedPath = 'generated'; // URL path component
 

@@ -31,29 +31,62 @@ class StoryParser implements StoryParserInterface
 
     public function segmentStory(string $story, array $options = []): array
     {
-        $this->logger->info("Segmenting story", [
+        $this->logger->info("Starting story segmentation", [
             'story_length' => strlen($story),
-            'target_panels' => self::PANEL_COUNT
+            'target_panels' => self::PANEL_COUNT,
+            'story_content' => $story,
+            'options' => $options
         ]);
 
         try {
             // Initial segmentation based on NLP
+            $this->logger->debug("Attempting NLP segmentation", [
+                'story_preview' => substr($story, 0, 100),
+                'options' => $options
+            ]);
+
             $segments = $this->segmentIntoScenes($story);
+
+            $this->logger->debug("Initial segmentation complete", [
+                'segment_count' => count($segments),
+                'segments' => array_map(fn($s) => [
+                    'length' => strlen($s),
+                    'content' => $s
+                ], $segments)
+            ]);
 
             // Enforce 4-panel format
             if (count($segments) < self::PANEL_COUNT) {
+                $this->logger->debug("Expanding scenes", [
+                    'current_count' => count($segments),
+                    'target_count' => self::PANEL_COUNT
+                ]);
                 $segments = $this->expandScenes($segments);
             } elseif (count($segments) > self::PANEL_COUNT) {
+                $this->logger->debug("Consolidating scenes", [
+                    'current_count' => count($segments),
+                    'target_count' => self::PANEL_COUNT
+                ]);
                 $segments = $this->consolidateScenes($segments);
             }
 
             // Validate final segments
             $this->validateSegments($segments);
 
+            $this->logger->info("Story segmentation completed", [
+                'final_segment_count' => count($segments),
+                'segments' => array_map(fn($s) => [
+                    'length' => strlen($s),
+                    'content' => $s
+                ], $segments)
+            ]);
+
             return $segments;
         } catch (Exception $e) {
             $this->logger->error("Story segmentation failed", [
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+                'story_length' => strlen($story)
             ]);
             throw $e;
         }
@@ -84,40 +117,82 @@ class StoryParser implements StoryParserInterface
         // Generate cache key based on story content
         $cacheKey = 'scene_' . md5($story);
 
+        $this->logger->debug("Starting NLP segmentation", [
+            'story_length' => strlen($story),
+            'cache_key' => $cacheKey
+        ]);
+
         // Try to get from cache first
         $cachedScenes = $this->cacheManager->get($cacheKey, self::CACHE_DURATION);
         if ($cachedScenes !== null) {
-            $this->logger->info("Using cached scene segmentation");
+            $this->logger->info("Using cached scene segmentation", [
+                'cache_key' => $cacheKey,
+                'scene_count' => count($cachedScenes)
+            ]);
             return $cachedScenes;
         }
 
         // Prepare the prompt for the NLP model
         $prompt = $this->buildSegmentationPrompt($story);
 
+        $this->logger->debug("Prepared NLP prompt", [
+            'prompt_length' => strlen($prompt),
+            'prompt_preview' => substr($prompt, 0, 200)
+        ]);
+
         try {
+            // Get model configuration
+            $modelConfig = $this->config->get('replicate.models.nlp');
+            if (!$modelConfig) {
+                throw new Exception('NLP model configuration not found');
+            }
+
+            $this->logger->debug("Calling NLP model", [
+                'model' => 'nlp',
+                'version' => $modelConfig['version'],
+                'parameters' => array_merge(
+                    $modelConfig['params'],
+                    ['prompt' => substr($prompt, 0, 100) . '...']
+                )
+            ]);
+
             // Call NLP model through ReplicateClient
-            $result = $this->replicateClient->predict('nlp', [
-                'prompt' => $prompt,
-                'max_length' => 2048,
-                'temperature' => 0.75,
-                'top_p' => 0.9,
-                'repetition_penalty' => 1.2
+            $result = $this->replicateClient->predict('nlp', array_merge(
+                $modelConfig['params'],
+                ['prompt' => $prompt]
+            ));
+
+            $this->logger->debug("NLP model response received", [
+                'raw_result' => $result,
+                'result_type' => gettype($result),
+                'has_content' => !empty($result)
             ]);
 
             // Process and validate NLP output
             $scenes = $this->processNLPOutput($result);
 
+            $this->logger->debug("Processed NLP output", [
+                'scene_count' => count($scenes),
+                'scenes' => array_map(fn($s) => [
+                    'length' => strlen($s),
+                    'content' => $s
+                ], $scenes)
+            ]);
+
             // Cache the results
             $this->cacheManager->set($cacheKey, $scenes);
 
             $this->logger->info("NLP segmentation successful", [
-                'scene_count' => count($scenes)
+                'scene_count' => count($scenes),
+                'cache_key' => $cacheKey
             ]);
 
             return $scenes;
         } catch (Exception $e) {
             $this->logger->error("NLP segmentation error", [
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+                'story_length' => strlen($story)
             ]);
             throw $e;
         }
@@ -128,7 +203,12 @@ class StoryParser implements StoryParserInterface
      */
     private function buildSegmentationPrompt(string $story): string
     {
-        return "Task: Analyze and segment this story into exactly 4 scenes for a comic strip panel sequence.
+        $this->logger->debug("Building segmentation prompt", [
+            'story_length' => strlen($story)
+        ]);
+
+        $prompt = <<<EOT
+Task: Analyze and segment this story into exactly 4 scenes for a comic strip panel sequence.
 
 Requirements:
 1. Each scene must be visually distinct and representable in a single panel
@@ -136,6 +216,7 @@ Requirements:
 3. Ensure proper distribution of action and dialogue
 4. Maintain character continuity across scenes
 5. Create natural transitions between panels
+6. Each scene should be self-contained yet connected to the overall narrative flow
 
 Story:
 $story
@@ -146,7 +227,20 @@ Format your response as 4 scenes, each marked with [SCENE] prefix:
 [SCENE] Third scene with rising action or conflict
 [SCENE] Final scene with resolution or punchline
 
-Note: Each scene should be self-contained yet connected to the overall narrative flow.";
+Note: Each scene description should:
+- Focus on visual elements that can be drawn
+- Include character positions and interactions
+- Describe the setting and atmosphere
+- Avoid dialogue-heavy descriptions
+- Be clear and concise
+EOT;
+
+        $this->logger->debug("Built segmentation prompt", [
+            'prompt_length' => strlen($prompt),
+            'prompt_preview' => substr($prompt, 0, 200)
+        ]);
+
+        return $prompt;
     }
 
     /**
@@ -155,11 +249,17 @@ Note: Each scene should be self-contained yet connected to the overall narrative
     private function processNLPOutput($result): array
     {
         if (empty($result)) {
+            $this->logger->error("NLP model returned empty result");
             throw new RuntimeException("NLP model returned empty result");
         }
 
         // Get the first element if result is an array
         $output = is_array($result) ? $result[0] : $result;
+
+        $this->logger->debug("Processing NLP output", [
+            'output_length' => strlen($output),
+            'output_preview' => substr($output, 0, 200)
+        ]);
 
         // Split output into scenes based on [SCENE] marker
         $scenes = array_filter(
@@ -170,6 +270,9 @@ Note: Each scene should be self-contained yet connected to the overall narrative
         );
 
         if (empty($scenes)) {
+            $this->logger->error("No valid scenes found in NLP output", [
+                'output' => $output
+            ]);
             throw new RuntimeException("No valid scenes found in NLP output");
         }
 
@@ -177,13 +280,16 @@ Note: Each scene should be self-contained yet connected to the overall narrative
         if (count($scenes) !== self::PANEL_COUNT) {
             $this->logger->warning("NLP model returned incorrect number of scenes", [
                 'expected' => self::PANEL_COUNT,
-                'received' => count($scenes)
+                'received' => count($scenes),
+                'scenes' => $scenes
             ]);
 
             // Attempt to fix scene count
             if (count($scenes) < self::PANEL_COUNT) {
+                $this->logger->debug("Expanding scenes to match panel count");
                 $scenes = $this->expandScenes($scenes);
             } else {
+                $this->logger->debug("Consolidating scenes to match panel count");
                 $scenes = $this->consolidateScenes($scenes);
             }
         }
@@ -191,9 +297,22 @@ Note: Each scene should be self-contained yet connected to the overall narrative
         // Validate scene content
         foreach ($scenes as $index => $scene) {
             if (strlen($scene) < 20) {
+                $this->logger->error("Scene $index is too short", [
+                    'scene' => $scene,
+                    'length' => strlen($scene)
+                ]);
                 throw new RuntimeException("Scene $index is too short for meaningful visualization");
             }
         }
+
+        $this->logger->debug("Processed scenes", [
+            'scene_count' => count($scenes),
+            'scenes' => array_map(fn($s, $i) => [
+                'index' => $i,
+                'length' => strlen($s),
+                'content' => substr($s, 0, 100) . '...'
+            ], $scenes, array_keys($scenes))
+        ]);
 
         return $scenes;
     }

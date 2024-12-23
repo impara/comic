@@ -165,81 +165,111 @@ export const ComicGenerator = {
         }
     },
 
-    updateProgress(state) {
-        if (!state) {
-            console.warn('No state provided to updateProgress');
-            return;
+    updateProgress(data) {
+        console.log('Comic generation progress:', data);
+
+        const { stripId, status, characters, panels } = data;
+
+        // Update progress bar and status message
+        const progressBar = document.getElementById('progress-bar');
+        const statusMessage = document.getElementById('status-message');
+
+        // Calculate overall progress based on state
+        let progress = 0;
+        let message = '';
+
+        switch (status) {
+            case 'init':
+                progress = 0;
+                message = 'Initializing...';
+                break;
+
+            case 'characters_pending':
+                progress = 5;
+                message = 'Preparing to process characters...';
+                break;
+
+            case 'characters_processing':
+                progress = 5 + (characters.count / characters.total) * 25;
+                message = `Processing characters: ${characters.message}`;
+                break;
+
+            case 'characters_complete':
+                progress = 30;
+                message = 'Characters completed, preparing story...';
+                break;
+
+            case 'story_segmenting':
+                progress = 35;
+                message = 'Segmenting story into panels...';
+                break;
+
+            case 'panels_generating':
+                // Calculate panel progress
+                const panelProgress = panels.total > 0
+                    ? (panels.count / panels.total) * 65
+                    : 0;
+                progress = 35 + panelProgress;
+                message = `Generating panels: ${panels.message}`;
+
+                // Add detailed panel status if available
+                if (data.panels && data.panels.details) {
+                    const pendingPanels = Object.values(data.panels.details)
+                        .filter(p => p.status === 'background_pending').length;
+                    const composingPanels = Object.values(data.panels.details)
+                        .filter(p => p.status === 'composing').length;
+
+                    if (pendingPanels > 0) {
+                        message += ` (${pendingPanels} backgrounds pending)`;
+                    }
+                    if (composingPanels > 0) {
+                        message += ` (${composingPanels} composing)`;
+                    }
+                }
+                break;
+
+            case 'complete':
+                progress = 100;
+                message = 'Comic generation complete!';
+                this.stopPolling();
+                this.showResult(data.output_url);
+                break;
+
+            case 'failed':
+                message = `Comic generation failed: ${data.error}`;
+                this.stopPolling();
+                this.showError(data.error);
+                break;
+
+            default:
+                message = 'Processing...';
         }
 
-        const progress = state.progress || 0;
-        if (this.uiManager) {
-            this.uiManager.updateProgress(progress);
+        // Update UI
+        if (progressBar) {
+            progressBar.style.width = `${progress}%`;
+            progressBar.setAttribute('aria-valuenow', progress);
         }
 
-        // Format character status
-        const formatCharacterStatus = (characters) => {
-            if (!characters) return '';
-            const totalCharacters = Object.keys(characters).length;
-            const completedCharacters = Object.values(characters)
-                .filter(c => c.status === 'completed').length;
-            const processingCharacters = Object.values(characters)
-                .filter(c => c.status === 'processing').length;
-            const failedCharacters = Object.values(characters)
-                .filter(c => c.status === 'failed').length;
-
-            let message = `${completedCharacters}/${totalCharacters} characters completed`;
-            if (processingCharacters > 0) message += `, ${processingCharacters} processing`;
-            if (failedCharacters > 0) message += `, ${failedCharacters} failed`;
-            return message;
-        };
-
-        // Format panel status
-        const formatPanelStatus = (panels) => {
-            if (!panels) return '';
-            const totalPanels = panels.length;
-            const completedPanels = panels.filter(p => p.status === 'completed').length;
-            const processingPanels = panels.filter(p => p.status === 'processing').length;
-            const failedPanels = panels.filter(p => p.status === 'failed').length;
-
-            let message = `${completedPanels}/${totalPanels} panels completed`;
-            if (processingPanels > 0) message += `, ${processingPanels} processing`;
-            if (failedPanels > 0) message += `, ${failedPanels} failed`;
-            return message;
-        };
-
-        // Generate formatted progress info
-        const progressInfo = {
-            stripId: this.stripId,
-            status: state.status,
-            characters: {
-                message: formatCharacterStatus(state.characters),
-                count: Object.keys(state.characters || {}).length
-            },
-            panels: {
-                message: formatPanelStatus(state.panels),
-                count: (state.panels || []).length
-            }
-        };
-
-        // Log formatted progress info
-        console.log('Comic generation progress:', progressInfo);
-
-        // Only log raw state in debug mode
-        if (window.DEBUG_MODE) {
-            console.debug('Raw comic generation state:', state);
+        if (statusMessage) {
+            statusMessage.textContent = message;
         }
 
-        // Update UI with detailed information
-        if (this.uiManager) {
-            this.uiManager.updateDebugInfo({
-                stripId: this.stripId,
-                status: state.status,
-                characters: progressInfo.characters.message,
-                panels: progressInfo.panels.message,
-                state_history: state.state_history || [],
-                current_operation: state.current_operation || 'unknown',
-                last_update: new Date().toISOString()
-            });
+        // Log state for debugging
+        console.log('Comic generation status:', {
+            stripId,
+            status,
+            progress,
+            message,
+            characters,
+            panels
+        });
+
+        // Continue polling if not complete or failed
+        if (status !== 'complete' && status !== 'failed') {
+            setTimeout(() => {
+                this.checkProgress(stripId);
+            }, 2000);
         }
     },
 
@@ -302,4 +332,82 @@ export const ComicGenerator = {
             this.uiManager.showError(error);
         }
     }
-}; 
+};
+
+async function checkProgress(stripId) {
+    try {
+        const response = await fetch(`/api/status.php?strip_id=${stripId}`);
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        const data = await response.json();
+
+        if (data.success) {
+            const state = data.data;
+            console.log('Raw state:', state);
+
+            // Format the progress data
+            const progressData = {
+                stripId,
+                status: state.status,
+                characters: {
+                    count: Object.values(state.characters || {})
+                        .filter(c => c.status === 'completed').length,
+                    total: Object.keys(state.characters || {}).length,
+                    message: formatCharacterProgress(state.characters)
+                },
+                panels: {
+                    count: Object.values(state.panels || {})
+                        .filter(p => p.status === 'completed').length,
+                    total: state.total_panels || 0,
+                    message: formatPanelProgress(state.panels)
+                },
+                error: state.error
+            };
+
+            updateProgress(progressData);
+        } else {
+            console.error('Failed to check progress:', data.error);
+            showError(data.error);
+        }
+    } catch (error) {
+        console.error('Error checking progress:', error);
+        showError(error.message);
+    }
+}
+
+function formatCharacterProgress(characters) {
+    if (!characters) return '0/0 characters completed';
+
+    const total = Object.keys(characters).length;
+    const completed = Object.values(characters)
+        .filter(c => c.status === 'completed').length;
+    const processing = Object.values(characters)
+        .filter(c => c.status === 'processing').length;
+    const failed = Object.values(characters)
+        .filter(c => c.status === 'failed').length;
+
+    let message = `${completed}/${total} characters completed`;
+    if (processing > 0) message += `, ${processing} processing`;
+    if (failed > 0) message += `, ${failed} failed`;
+
+    return message;
+}
+
+function formatPanelProgress(panels) {
+    if (!panels) return '0/0 panels completed';
+
+    const total = Object.keys(panels).length;
+    const completed = Object.values(panels)
+        .filter(p => p.status === 'complete').length;
+    const generating = Object.values(panels)
+        .filter(p => ['background_pending', 'background_ready', 'composing'].includes(p.status)).length;
+    const failed = Object.values(panels)
+        .filter(p => p.status === 'failed').length;
+
+    let message = `${completed}/${total} panels completed`;
+    if (generating > 0) message += `, ${generating} generating`;
+    if (failed > 0) message += `, ${failed} failed`;
+
+    return message;
+} 

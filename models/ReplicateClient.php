@@ -76,7 +76,7 @@ class ReplicateClient
     {
         $this->logger->info('Making prediction', [
             'model_type' => $modelType,
-            'params' => $params
+            'params' => array_merge($params, ['prompt' => substr($params['prompt'] ?? '', 0, 100) . '...'])
         ]);
 
         // Get model configuration
@@ -87,9 +87,19 @@ class ReplicateClient
 
         // For NLP model, handle synchronously
         if ($modelType === 'nlp') {
+            $this->logger->debug('Creating NLP prediction', [
+                'version' => $modelConfig['version'],
+                'params' => array_merge($params, ['prompt' => substr($params['prompt'] ?? '', 0, 100) . '...'])
+            ]);
+
             $result = $this->post([
                 'version' => $modelConfig['version'],
                 'input' => array_merge($modelConfig['params'], $params)
+            ]);
+
+            $this->logger->debug('NLP prediction created', [
+                'prediction_id' => $result['id'] ?? 'unknown',
+                'status' => $result['status'] ?? 'unknown'
             ]);
 
             // Poll for results
@@ -98,7 +108,18 @@ class ReplicateClient
             while ($attempt < $maxAttempts) {
                 $status = $this->get("https://api.replicate.com/v1/predictions/{$result['id']}");
 
+                $this->logger->debug('NLP prediction status', [
+                    'prediction_id' => $result['id'],
+                    'status' => $status['status'],
+                    'attempt' => $attempt + 1,
+                    'has_output' => isset($status['output']),
+                    'has_error' => isset($status['error'])
+                ]);
+
                 if ($status['status'] === 'succeeded') {
+                    if (!isset($status['output']) || empty($status['output'])) {
+                        throw new Exception('NLP model returned empty output');
+                    }
                     return $status['output'];
                 } elseif ($status['status'] === 'failed') {
                     throw new Exception($status['error'] ?? 'Prediction failed');
@@ -107,7 +128,7 @@ class ReplicateClient
                 $attempt++;
                 sleep(2);
             }
-            throw new Exception("Prediction timed out");
+            throw new Exception("Prediction timed out after {$maxAttempts} attempts");
         }
 
         throw new Exception("Unsupported model type: {$modelType}");
