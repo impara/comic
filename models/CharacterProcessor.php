@@ -196,14 +196,14 @@ class CharacterProcessor
                     $this->logger->debug('Configuring cartoonify webhook', [
                         'webhook_url' => $webhookUrl,
                         'character_id' => $characterId,
-                        'events' => ['completed', 'succeeded']
+                        'events' => ['completed']
                     ]);
 
                     $prediction = $this->replicateClient->createPrediction([
                         'image' => $imageData['url'],
                         'character_id' => $characterId,
                         'webhook' => $webhookUrl,
-                        'webhook_events_filter' => ['completed', 'succeeded']
+                        'webhook_events_filter' => ['completed']
                     ]);
 
                     $this->logger->debug('Cartoonification prediction created', [
