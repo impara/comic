@@ -81,13 +81,11 @@ export const ComicGenerator = {
         }
 
         const maxPollingTime = 5 * 60 * 1000; // 5 minutes
-        const warningTime = 2 * 60 * 1000;    // 2 minutes
         const startTime = Date.now();
         let consecutiveErrors = 0;
-        let warningShown = false;
-        let initialDelay = true;
+        let lastState = null;
 
-        this.pollInterval = setInterval(async () => {
+        const checkStatus = async () => {
             try {
                 if (!this.stripId) {
                     console.error('No strip ID available for polling');
@@ -95,13 +93,13 @@ export const ComicGenerator = {
                     return;
                 }
 
-                const response = await fetch(`/api.php?action=status&id=${this.stripId}`);
+                const response = await fetch(`/api.php?action=status&id=${this.stripId}&t=${Date.now()}`);
                 if (!response.ok) {
-                    throw new Error(`Server error: ${response.status} - ${response.statusText}`);
+                    throw new Error(`Server error: ${response.status}`);
                 }
 
                 const result = await response.json();
-                if (!result || !result.success) {
+                if (!result.success) {
                     throw new Error(result?.error || 'Invalid response from server');
                 }
 
@@ -110,7 +108,17 @@ export const ComicGenerator = {
                     throw new Error('No state data in response');
                 }
 
-                console.log('Comic generation status:', state);
+                // Only update UI if state has changed
+                if (!lastState ||
+                    lastState.status !== state.status ||
+                    lastState.progress !== state.progress ||
+                    JSON.stringify(lastState.characters) !== JSON.stringify(state.characters) ||
+                    JSON.stringify(lastState.panels) !== JSON.stringify(state.panels)) {
+
+                    console.log('Comic generation status update:', state);
+                    this.updateProgress(state);
+                    lastState = state;
+                }
 
                 // Reset consecutive errors on successful response
                 consecutiveErrors = 0;
@@ -123,39 +131,34 @@ export const ComicGenerator = {
                     throw new Error(state.error || 'Comic generation failed');
                 }
 
-                // Update progress
-                this.updateProgress(state);
-
                 // Check for timeout
-                const elapsedTime = Date.now() - startTime;
-                if (elapsedTime > maxPollingTime) {
+                if (Date.now() - startTime > maxPollingTime) {
                     throw new Error('Comic generation timed out after 5 minutes');
                 }
 
-                // Show warning if taking longer than expected
-                if (!warningShown && elapsedTime > warningTime) {
-                    console.warn('Comic generation is taking longer than expected');
-                    warningShown = true;
-                }
+                // Adjust polling interval based on state
+                const nextInterval = state.status === 'story_segmenting' ? 2000 : 5000;
+                setTimeout(checkStatus, nextInterval);
 
             } catch (error) {
                 console.error('Error checking status:', error);
                 consecutiveErrors++;
 
-                // Show error in UI after 3 consecutive failures
                 if (consecutiveErrors >= 3) {
                     this.stopPolling();
                     if (this.uiManager) {
                         this.uiManager.showError(`Failed to check comic generation status: ${error.message}`);
                     }
+                    return;
                 }
-            }
-        }, initialDelay ? 2000 : 5000);
 
-        // Clear initial delay flag after first interval
-        setTimeout(() => {
-            initialDelay = false;
-        }, 2000);
+                // Retry with backoff
+                setTimeout(checkStatus, Math.min(2000 * Math.pow(2, consecutiveErrors), 10000));
+            }
+        };
+
+        // Start the first check
+        checkStatus();
     },
 
     stopPolling() {

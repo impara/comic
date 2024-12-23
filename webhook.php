@@ -24,84 +24,43 @@ class WebhookHandler
     public function handleWebhook(): void
     {
         try {
-            // Log request details
-            $this->logger->debug('Webhook request received', [
-                'timestamp' => date('Y-m-d H:i:s'),
-                'request_method' => $_SERVER['REQUEST_METHOD'],
-                'remote_addr' => $_SERVER['REMOTE_ADDR'],
-                'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? 'not set',
-                'content_type' => $_SERVER['CONTENT_TYPE'] ?? 'not set',
-                'content_length' => $_SERVER['CONTENT_LENGTH'] ?? 'not set',
-                'query_params' => $_GET,
-                'server_info' => [
-                    'software' => $_SERVER['SERVER_SOFTWARE'] ?? 'unknown',
-                    'protocol' => $_SERVER['SERVER_PROTOCOL'] ?? 'unknown',
-                    'request_time' => $_SERVER['REQUEST_TIME'] ?? 'unknown'
-                ]
-            ]);
-
-            // Log raw request data
-            $rawInput = file_get_contents('php://input');
-            $this->logger->debug('Raw webhook payload received', [
-                'data' => $rawInput,
-                'length' => strlen($rawInput),
-                'headers' => getallheaders()
-            ]);
-
             // Get webhook payload
+            $rawInput = file_get_contents('php://input');
             $payload = json_decode($rawInput, true);
-            if (!$payload) {
-                $jsonError = json_last_error_msg();
-                $this->logger->error('Failed to parse webhook payload', [
-                    'error' => $jsonError,
-                    'raw_input_preview' => substr($rawInput, 0, 1000) // First 1000 chars for debugging
-                ]);
-                throw new Exception('Invalid webhook payload: ' . $jsonError);
+
+            if (!$payload || !isset($payload['id'])) {
+                throw new Exception('Invalid webhook payload');
             }
 
-            $this->logger->debug('Parsed webhook payload', [
-                'payload' => $payload,
-                'prediction_id' => $payload['id'] ?? 'not set',
-                'status' => $payload['status'] ?? 'not set',
-                'version' => $payload['version'] ?? 'not set',
-                'has_output' => isset($payload['output']),
-                'has_error' => isset($payload['error'])
-            ]);
+            $predictionId = $payload['id'];
+            $lockFile = $this->config->get('paths.temp') . "/webhook_{$predictionId}.lock";
 
-            // Extract prediction details
-            $predictionId = $payload['id'] ?? null;
-            $status = $payload['status'] ?? null;
-            $output = $payload['output'] ?? null;
-            $error = $payload['error'] ?? null;
-            $version = $payload['version'] ?? null;
-
-            if (!$predictionId || !$status) {
-                throw new Exception('Missing required webhook data');
-            }
-
-            // Determine model type from version
-            $modelType = null;
-            foreach ($this->config->get('replicate.models') as $type => $model) {
-                if ($model['version'] === $version) {
-                    $modelType = $type;
-                    break;
+            // Simple file-based duplicate prevention
+            if (file_exists($lockFile)) {
+                $lockData = json_decode(file_get_contents($lockFile), true);
+                if ($lockData && isset($lockData['timestamp']) && (time() - $lockData['timestamp']) < 30) {
+                    $this->logger->debug('Skipping duplicate webhook', [
+                        'prediction_id' => $predictionId,
+                        'last_processed' => $lockData['timestamp']
+                    ]);
+                    http_response_code(200);
+                    echo json_encode(['success' => true, 'message' => 'Already processed']);
+                    return;
                 }
             }
 
-            if (!$modelType) {
-                throw new Exception('Unknown model version');
-            }
+            // Create/update lock file
+            file_put_contents($lockFile, json_encode([
+                'timestamp' => time(),
+                'status' => $payload['status'] ?? 'unknown'
+            ]));
 
-            // Handle different model types
-            switch ($modelType) {
-                case 'cartoonify':
-                    $this->handleCartoonifyWebhook($payload);
-                    break;
-                case 'sdxl':
-                    $this->handleSdxlWebhook($payload);
-                    break;
-                default:
-                    throw new Exception('Unsupported model type');
+            // Process the webhook
+            $this->processWebhook($payload);
+
+            // Cleanup old lock file after successful processing
+            if (file_exists($lockFile)) {
+                unlink($lockFile);
             }
 
             http_response_code(200);
@@ -989,6 +948,115 @@ class WebhookHandler
         ]);
 
         return null;
+    }
+
+    private function processWebhook(array $payload): void
+    {
+        $predictionId = $payload['id'];
+        $status = $payload['status'] ?? null;
+        $output = $payload['output'] ?? null;
+        $error = $payload['error'] ?? null;
+        $version = $payload['version'] ?? null;
+
+        if (!$status) {
+            throw new Exception('Missing status in webhook data');
+        }
+
+        // Determine model type from version
+        $modelType = null;
+        foreach ($this->config->get('replicate.models') as $type => $model) {
+            if ($model['version'] === $version) {
+                $modelType = $type;
+                break;
+            }
+        }
+
+        if (!$modelType) {
+            throw new Exception('Unknown model version');
+        }
+
+        // Handle different model types
+        switch ($modelType) {
+            case 'cartoonify':
+                $this->handleCartoonifyWebhook($payload);
+                break;
+            case 'sdxl':
+                $this->handleSdxlWebhook($payload);
+                break;
+            case 'llama':
+                $this->handleLlamaWebhook($payload);
+                break;
+            default:
+                throw new Exception('Unsupported model type');
+        }
+    }
+
+    private function handleLlamaWebhook(array $payload): void
+    {
+        $predictionId = $payload['id'];
+        $status = $payload['status'];
+        $output = $payload['output'] ?? null;
+
+        // Get pending file data to retrieve stripId
+        $pendingFile = $this->config->getTempPath() . "/pending_{$predictionId}.json";
+        if (!file_exists($pendingFile)) {
+            $this->logger->error('Pending file not found for LLaMA webhook', [
+                'prediction_id' => $predictionId
+            ]);
+            return;
+        }
+
+        $pendingData = json_decode(file_get_contents($pendingFile), true);
+        if (!$pendingData || !isset($pendingData['strip_id'])) {
+            $this->logger->error('Invalid pending data for LLaMA webhook', [
+                'prediction_id' => $predictionId
+            ]);
+            return;
+        }
+
+        $stripId = $pendingData['strip_id'];
+
+        if ($status === 'succeeded' && $output) {
+            // Store the result
+            $resultFile = $this->config->get('paths.temp') . "/llama_result_{$predictionId}.json";
+            file_put_contents($resultFile, json_encode([
+                'timestamp' => time(),
+                'output' => $output,
+                'status' => 'completed'
+            ]));
+
+            // Update strip state using correct state constant
+            $this->stateManager->updateStripState($stripId, [
+                'status' => StateManager::STATE_PANELS_GENERATING,  // Changed from 'story_segmented'
+                'progress' => 40,
+                'current_operation' => 'Story segmentation completed, starting panel generation',
+                'llama_result' => $output
+            ]);
+
+            $this->logger->debug('LLaMA webhook processed successfully', [
+                'strip_id' => $stripId,
+                'prediction_id' => $predictionId,
+                'new_state' => StateManager::STATE_PANELS_GENERATING
+            ]);
+        } else {
+            // Handle failure using correct state constant
+            $this->stateManager->updateStripState($stripId, [
+                'status' => StateManager::STATE_FAILED,  // Using constant instead of string
+                'error' => $payload['error'] ?? 'LLaMA processing failed',
+                'current_operation' => 'Story segmentation failed'
+            ]);
+
+            $this->logger->error('LLaMA webhook processing failed', [
+                'strip_id' => $stripId,
+                'prediction_id' => $predictionId,
+                'error' => $payload['error'] ?? 'Unknown error'
+            ]);
+        }
+
+        // Clean up pending file
+        if (file_exists($pendingFile)) {
+            unlink($pendingFile);
+        }
     }
 }
 

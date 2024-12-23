@@ -114,88 +114,46 @@ class StoryParser implements StoryParserInterface
      */
     private function nlpSegmentation(string $story): array
     {
-        // Generate cache key based on story content
-        $cacheKey = 'scene_' . md5($story);
+        // Simple cache key based on story hash
+        $cacheKey = 'story_' . md5($story);
+        $cacheFile = $this->config->getTempPath() . '/' . $cacheKey . '.json';
 
-        $this->logger->debug("Starting NLP segmentation", [
-            'story_length' => strlen($story),
-            'cache_key' => $cacheKey
-        ]);
-
-        // Try to get from cache first
-        $cachedScenes = $this->cacheManager->get($cacheKey, self::CACHE_DURATION);
-        if ($cachedScenes !== null) {
-            $this->logger->info("Using cached scene segmentation", [
-                'cache_key' => $cacheKey,
-                'scene_count' => count($cachedScenes)
-            ]);
-            return $cachedScenes;
+        // Check if we already have the result
+        if (file_exists($cacheFile)) {
+            $data = json_decode(file_get_contents($cacheFile), true);
+            if ($data && isset($data['scenes'])) {
+                $this->logger->debug("Using cached segmentation", [
+                    'cache_key' => $cacheKey
+                ]);
+                return $data['scenes'];
+            }
         }
 
-        // Prepare the prompt for the NLP model
+        // Get model configuration
+        $modelConfig = $this->config->get('replicate.models.nlp');
+        if (!$modelConfig) {
+            throw new Exception('NLP model configuration not found');
+        }
+
+        // Prepare the prompt
         $prompt = $this->buildSegmentationPrompt($story);
 
-        $this->logger->debug("Prepared NLP prompt", [
-            'prompt_length' => strlen($prompt),
-            'prompt_preview' => substr($prompt, 0, 200)
-        ]);
+        // Call NLP model through ReplicateClient
+        $result = $this->replicateClient->predict('nlp', array_merge(
+            $modelConfig['params'],
+            ['prompt' => $prompt]
+        ));
 
-        try {
-            // Get model configuration
-            $modelConfig = $this->config->get('replicate.models.nlp');
-            if (!$modelConfig) {
-                throw new Exception('NLP model configuration not found');
-            }
+        // Process and validate NLP output
+        $scenes = $this->processNLPOutput($result);
 
-            $this->logger->debug("Calling NLP model", [
-                'model' => 'nlp',
-                'version' => $modelConfig['version'],
-                'parameters' => array_merge(
-                    $modelConfig['params'],
-                    ['prompt' => substr($prompt, 0, 100) . '...']
-                )
-            ]);
+        // Save the result
+        file_put_contents($cacheFile, json_encode([
+            'timestamp' => time(),
+            'scenes' => $scenes
+        ]));
 
-            // Call NLP model through ReplicateClient
-            $result = $this->replicateClient->predict('nlp', array_merge(
-                $modelConfig['params'],
-                ['prompt' => $prompt]
-            ));
-
-            $this->logger->debug("NLP model response received", [
-                'raw_result' => $result,
-                'result_type' => gettype($result),
-                'has_content' => !empty($result)
-            ]);
-
-            // Process and validate NLP output
-            $scenes = $this->processNLPOutput($result);
-
-            $this->logger->debug("Processed NLP output", [
-                'scene_count' => count($scenes),
-                'scenes' => array_map(fn($s) => [
-                    'length' => strlen($s),
-                    'content' => $s
-                ], $scenes)
-            ]);
-
-            // Cache the results
-            $this->cacheManager->set($cacheKey, $scenes);
-
-            $this->logger->info("NLP segmentation successful", [
-                'scene_count' => count($scenes),
-                'cache_key' => $cacheKey
-            ]);
-
-            return $scenes;
-        } catch (Exception $e) {
-            $this->logger->error("NLP segmentation error", [
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-                'story_length' => strlen($story)
-            ]);
-            throw $e;
-        }
+        return $scenes;
     }
 
     /**
