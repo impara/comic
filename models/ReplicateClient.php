@@ -22,7 +22,8 @@ class ReplicateClient
     {
         $this->logger->debug('Creating prediction', [
             'input' => $input,
-            'webhook_url' => $this->config->getBaseUrl() . '/webhook.php'
+            'webhook_url' => $input['webhook'] ?? null,
+            'webhook_events' => $input['webhook_events_filter'] ?? []
         ]);
 
         // Get model version from config
@@ -31,18 +32,30 @@ class ReplicateClient
             throw new Exception('Cartoonify model version not configured');
         }
 
-        // Get webhook URL from config
-        $webhookUrl = $this->config->getBaseUrl() . '/webhook.php';
-
-        $response = $this->post([
+        // Prepare API request data
+        $requestData = [
             'version' => $modelConfig['version'],
             'input' => [
                 'image' => $input['image'],
                 'character_id' => $input['character_id']
-            ],
-            'webhook' => $webhookUrl,
-            'webhook_events_filter' => ['completed']
+            ]
+        ];
+
+        // Add webhook configuration if provided
+        if (isset($input['webhook'])) {
+            $requestData['webhook'] = $input['webhook'];
+            $requestData['webhook_events_filter'] = $input['webhook_events_filter'] ?? ['completed'];
+        }
+
+        $this->logger->debug('Making Replicate API request', [
+            'version' => $modelConfig['version'],
+            'webhook_config' => [
+                'url' => $requestData['webhook'] ?? null,
+                'events' => $requestData['webhook_events_filter'] ?? []
+            ]
         ]);
+
+        $response = $this->post($requestData);
 
         if (!isset($response['id'])) {
             throw new Exception('Invalid prediction response');
@@ -51,8 +64,9 @@ class ReplicateClient
         $this->logger->debug('Prediction created successfully', [
             'prediction_id' => $response['id'],
             'status' => $response['status'] ?? 'unknown',
-            'webhook_configured' => true,
-            'webhook_url' => $webhookUrl
+            'webhook_configured' => isset($requestData['webhook']),
+            'webhook_url' => $requestData['webhook'] ?? null,
+            'webhook_events' => $requestData['webhook_events_filter'] ?? []
         ]);
 
         return $response;

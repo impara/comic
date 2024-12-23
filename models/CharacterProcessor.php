@@ -191,15 +191,26 @@ class CharacterProcessor
                         sleep($retryDelay);
                     }
 
+                    // Ensure webhook URL is properly configured
+                    $webhookUrl = rtrim($this->config->getBaseUrl(), '/') . '/webhook.php';
+                    $this->logger->debug('Configuring cartoonify webhook', [
+                        'webhook_url' => $webhookUrl,
+                        'character_id' => $characterId,
+                        'events' => ['completed', 'succeeded']
+                    ]);
+
                     $prediction = $this->replicateClient->createPrediction([
                         'image' => $imageData['url'],
-                        'character_id' => $characterId
+                        'character_id' => $characterId,
+                        'webhook' => $webhookUrl,
+                        'webhook_events_filter' => ['completed', 'succeeded']
                     ]);
 
                     $this->logger->debug('Cartoonification prediction created', [
                         'prediction_id' => $prediction['id'],
                         'character_id' => $characterId,
-                        'status' => $prediction['status'] ?? 'unknown'
+                        'status' => $prediction['status'] ?? 'unknown',
+                        'webhook_url' => $webhookUrl
                     ]);
 
                     return $prediction;
@@ -208,7 +219,8 @@ class CharacterProcessor
                     $this->logger->error('Cartoonification attempt failed', [
                         'attempt' => $attempt + 1,
                         'max_retries' => $maxRetries,
-                        'error' => $e->getMessage()
+                        'error' => $e->getMessage(),
+                        'character_id' => $characterId
                     ]);
                 }
             }

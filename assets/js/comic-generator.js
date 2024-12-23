@@ -176,65 +176,66 @@ export const ComicGenerator = {
             this.uiManager.updateProgress(progress);
         }
 
-        // Build detailed status message
-        let statusMessage = '';
-        if (state.characters) {
-            const totalCharacters = Object.keys(state.characters).length;
-            const completedCharacters = Object.values(state.characters)
+        // Format character status
+        const formatCharacterStatus = (characters) => {
+            if (!characters) return '';
+            const totalCharacters = Object.keys(characters).length;
+            const completedCharacters = Object.values(characters)
                 .filter(c => c.status === 'completed').length;
-            const processingCharacters = Object.values(state.characters)
+            const processingCharacters = Object.values(characters)
                 .filter(c => c.status === 'processing').length;
-            const failedCharacters = Object.values(state.characters)
-                .filter(c => c.status === 'failed');
+            const failedCharacters = Object.values(characters)
+                .filter(c => c.status === 'failed').length;
 
-            statusMessage = `${completedCharacters}/${totalCharacters} characters completed`;
-            if (processingCharacters > 0) {
-                statusMessage += `, ${processingCharacters} processing`;
-            }
-            if (failedCharacters.length > 0) {
-                statusMessage += `, ${failedCharacters.length} failed`;
-            }
-        }
+            let message = `${completedCharacters}/${totalCharacters} characters completed`;
+            if (processingCharacters > 0) message += `, ${processingCharacters} processing`;
+            if (failedCharacters > 0) message += `, ${failedCharacters} failed`;
+            return message;
+        };
 
-        // Build panel status message
-        let panelMessage = '';
-        if (state.panels) {
-            const totalPanels = state.panels.length;
-            const completedPanels = state.panels.filter(p => p.status === 'completed').length;
-            const processingPanels = state.panels.filter(p => p.status === 'processing').length;
-            const failedPanels = state.panels.filter(p => p.status === 'failed');
+        // Format panel status
+        const formatPanelStatus = (panels) => {
+            if (!panels) return '';
+            const totalPanels = panels.length;
+            const completedPanels = panels.filter(p => p.status === 'completed').length;
+            const processingPanels = panels.filter(p => p.status === 'processing').length;
+            const failedPanels = panels.filter(p => p.status === 'failed').length;
 
-            panelMessage = `${completedPanels}/${totalPanels} panels completed`;
-            if (processingPanels > 0) {
-                panelMessage += `, ${processingPanels} processing`;
-            }
-            if (failedPanels.length > 0) {
-                panelMessage += `, ${failedPanels.length} failed`;
-            }
-        }
+            let message = `${completedPanels}/${totalPanels} panels completed`;
+            if (processingPanels > 0) message += `, ${processingPanels} processing`;
+            if (failedPanels > 0) message += `, ${failedPanels} failed`;
+            return message;
+        };
 
-        // Log detailed progress
-        console.log('Comic generation progress:', {
+        // Generate formatted progress info
+        const progressInfo = {
             stripId: this.stripId,
             status: state.status,
             characters: {
-                message: statusMessage,
-                details: state.characters
+                message: formatCharacterStatus(state.characters),
+                count: Object.keys(state.characters || {}).length
             },
             panels: {
-                message: panelMessage,
-                details: state.panels
-            },
-            raw_state: state
-        });
+                message: formatPanelStatus(state.panels),
+                count: (state.panels || []).length
+            }
+        };
+
+        // Log formatted progress info
+        console.log('Comic generation progress:', progressInfo);
+
+        // Only log raw state in debug mode
+        if (window.DEBUG_MODE) {
+            console.debug('Raw comic generation state:', state);
+        }
 
         // Update UI with detailed information
         if (this.uiManager) {
             this.uiManager.updateDebugInfo({
                 stripId: this.stripId,
                 status: state.status,
-                characters: statusMessage,
-                panels: panelMessage,
+                characters: progressInfo.characters.message,
+                panels: progressInfo.panels.message,
                 state_history: state.state_history || [],
                 current_operation: state.current_operation || 'unknown',
                 last_update: new Date().toISOString()
