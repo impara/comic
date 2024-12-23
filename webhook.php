@@ -279,11 +279,21 @@ class WebhookHandler
             'status' => $status,
             'has_output' => !empty($output),
             'has_error' => !empty($error),
+            'raw_output' => $output,
+            'raw_error' => $error,
             'timestamp' => date('Y-m-d H:i:s')
         ]);
 
         // Find associated panel state
         $panelStates = glob($this->config->get('paths.temp') . '/state_panel_*.json');
+
+        $this->logger->debug('Searching for panel state', [
+            'prediction_id' => $predictionId,
+            'total_panel_states' => count($panelStates),
+            'temp_path' => $this->config->get('paths.temp'),
+            'panel_state_files' => $panelStates
+        ]);
+
         $targetPanel = null;
         $targetState = null;
 
@@ -292,6 +302,11 @@ class WebhookHandler
         $lockFp = fopen($lockFile, 'c+');
 
         if (!$lockFp) {
+            $this->logger->error('Failed to create webhook lock file', [
+                'prediction_id' => $predictionId,
+                'lock_file' => $lockFile,
+                'error' => error_get_last()
+            ]);
             throw new Exception("Could not create webhook lock file");
         }
 
@@ -300,25 +315,64 @@ class WebhookHandler
             $startTime = time();
             while (!flock($lockFp, LOCK_EX | LOCK_NB)) {
                 if (time() - $startTime >= 10) { // 10 second timeout
+                    $this->logger->error('Timeout waiting for webhook lock', [
+                        'prediction_id' => $predictionId,
+                        'lock_file' => $lockFile,
+                        'wait_time' => time() - $startTime
+                    ]);
                     throw new Exception("Timeout waiting for webhook lock");
                 }
                 usleep(250000); // Wait 250ms before retrying
             }
 
+            $this->logger->debug('Acquired webhook lock', [
+                'prediction_id' => $predictionId,
+                'lock_file' => $lockFile,
+                'time_taken' => time() - $startTime
+            ]);
+
             foreach ($panelStates as $statePath) {
                 $state = json_decode(file_get_contents($statePath), true);
+                if (!$state) {
+                    $this->logger->warning('Failed to parse panel state file', [
+                        'prediction_id' => $predictionId,
+                        'state_path' => $statePath,
+                        'raw_content' => file_get_contents($statePath),
+                        'json_error' => json_last_error_msg()
+                    ]);
+                    continue;
+                }
+
                 if (isset($state['background_prediction_id']) && $state['background_prediction_id'] === $predictionId) {
                     $targetPanel = basename($statePath, '.json');
                     $targetState = $state;
+                    $this->logger->debug('Found matching panel state', [
+                        'prediction_id' => $predictionId,
+                        'panel_id' => $targetPanel,
+                        'state_path' => $statePath,
+                        'state' => $state
+                    ]);
                     break;
                 }
             }
 
             if (!$targetPanel || !$targetState) {
+                $this->logger->error('Could not find panel state', [
+                    'prediction_id' => $predictionId,
+                    'searched_files' => $panelStates,
+                    'temp_path' => $this->config->get('paths.temp')
+                ]);
                 throw new Exception('Could not find panel state for prediction ' . $predictionId);
             }
 
             if ($status === 'succeeded' && $output) {
+                $this->logger->debug('Processing successful SDXL result', [
+                    'prediction_id' => $predictionId,
+                    'panel_id' => $targetPanel,
+                    'output_url' => $output[0],
+                    'current_state' => $targetState
+                ]);
+
                 // Update panel state with background URL
                 $this->stateManager->updatePanelState($targetPanel, [
                     'background_url' => $output[0],
@@ -330,12 +384,20 @@ class WebhookHandler
                 $this->logger->info('Panel background generated', [
                     'panel_id' => $targetPanel,
                     'prediction_id' => $predictionId,
-                    'background_url' => $output[0]
+                    'background_url' => $output[0],
+                    'updated_state' => $this->stateManager->getPanelState($targetPanel)
                 ]);
 
                 // Check if we can proceed with character composition
                 $this->checkAndStartCharacterComposition($targetPanel, $targetState);
             } elseif ($status === 'failed') {
+                $this->logger->error('Panel background generation failed', [
+                    'panel_id' => $targetPanel,
+                    'prediction_id' => $predictionId,
+                    'error' => $error,
+                    'current_state' => $targetState
+                ]);
+
                 // Update panel state with error
                 $this->stateManager->updatePanelState($targetPanel, [
                     'status' => StateManager::PANEL_STATE_FAILED,
@@ -343,10 +405,17 @@ class WebhookHandler
                     'failed_at' => time()
                 ]);
 
-                $this->logger->error('Panel background generation failed', [
+                $this->logger->error('Updated panel state after failure', [
                     'panel_id' => $targetPanel,
                     'prediction_id' => $predictionId,
-                    'error' => $error
+                    'updated_state' => $this->stateManager->getPanelState($targetPanel)
+                ]);
+            } else {
+                $this->logger->debug('Received non-terminal SDXL webhook status', [
+                    'prediction_id' => $predictionId,
+                    'panel_id' => $targetPanel,
+                    'status' => $status,
+                    'current_state' => $targetState
                 ]);
             }
 
@@ -361,12 +430,30 @@ class WebhookHandler
                         'strip_id' => $targetState['strip_id'],
                         'status' => $apiState['status'],
                         'progress' => $apiState['progress'],
-                        'current_operation' => $apiState['current_operation']
+                        'current_operation' => $apiState['current_operation'],
+                        'characters' => array_map(fn($char) => [
+                            'id' => $char['id'],
+                            'status' => $char['status']
+                        ], $stripState['characters']),
+                        'panels' => array_map(fn($panel) => [
+                            'id' => $panel['id'],
+                            'status' => $panel['status']
+                        ], $stripState['panels'] ?? [])
+                    ]);
+                } else {
+                    $this->logger->error('Failed to retrieve strip state', [
+                        'strip_id' => $targetState['strip_id'],
+                        'panel_id' => $targetPanel,
+                        'prediction_id' => $predictionId
                     ]);
                 }
             }
         } finally {
             // Always release the lock
+            $this->logger->debug('Releasing webhook lock', [
+                'prediction_id' => $predictionId,
+                'lock_file' => $lockFile
+            ]);
             flock($lockFp, LOCK_UN);
             fclose($lockFp);
             @unlink($lockFile);
@@ -506,7 +593,7 @@ class WebhookHandler
                         'previous_status' => $stripState['status']
                     ]);
 
-                    $this->stateManager->updateStripState($stripId, [
+                    $stripState = $this->stateManager->updateStripState($stripId, [
                         'status' => StateManager::STATE_CHARACTERS_COMPLETE
                     ]);
 
@@ -515,7 +602,7 @@ class WebhookHandler
                         'strip_id' => $stripId
                     ]);
 
-                    $this->stateManager->updateStripState($stripId, [
+                    $stripState = $this->stateManager->updateStripState($stripId, [
                         'status' => StateManager::STATE_STORY_SEGMENTING
                     ]);
 
@@ -543,11 +630,16 @@ class WebhookHandler
                         $storyParser
                     );
 
-                    $result = $comicGenerator->startPanelGeneration($stripId);
-
-                    $this->logger->debug('Panel generation started', [
+                    $this->logger->debug('Initializing panel generation', [
                         'strip_id' => $stripId,
-                        'result' => $result
+                        'state' => $stripState
+                    ]);
+
+                    $comicGenerator->startPanelGeneration($stripId);
+
+                    $this->logger->debug('Panel generation started successfully', [
+                        'strip_id' => $stripId,
+                        'current_state' => $this->stateManager->getStripState($stripId)
                     ]);
                 } catch (Exception $e) {
                     $this->logger->error('Failed to start panel generation', [
@@ -559,6 +651,7 @@ class WebhookHandler
                         'status' => StateManager::STATE_FAILED,
                         'error' => 'Failed to start panel generation: ' . $e->getMessage()
                     ]);
+                    throw $e;
                 }
             } else {
                 $this->logger->debug('Strip not in correct state for panel generation', [
@@ -585,47 +678,132 @@ class WebhookHandler
 
     private function checkAndStartCharacterComposition(string $panelId, array $panelState): void
     {
-        if (!isset($panelState['strip_id'])) {
-            throw new Exception('Panel state missing strip ID');
-        }
+        $this->logger->debug('Checking character composition conditions', [
+            'panel_id' => $panelId,
+            'current_state' => $panelState,
+            'has_background' => isset($panelState['background_url']),
+            'has_characters' => isset($panelState['characters']) && !empty($panelState['characters']),
+            'status' => $panelState['status'] ?? 'unknown'
+        ]);
 
-        $stripState = $this->stateManager->getStripState($panelState['strip_id']);
-        if (!$stripState) {
-            throw new Exception('Strip state not found');
-        }
-
-        // Start character composition if all characters are ready
-        $allCharactersReady = true;
-        foreach ($stripState['characters'] as $character) {
-            if ($character['status'] !== 'completed') {
-                $allCharactersReady = false;
-                break;
-            }
-        }
-
-        if ($allCharactersReady) {
+        if (
+            isset($panelState['background_url']) &&
+            isset($panelState['characters']) &&
+            !empty($panelState['characters']) &&
+            $panelState['status'] === StateManager::PANEL_STATE_BACKGROUND_READY
+        ) {
             try {
-                // Initialize ImageComposer with proper dependencies
+                // First update state to composing
+                $this->stateManager->updatePanelState($panelId, [
+                    'status' => StateManager::PANEL_STATE_COMPOSING,
+                    'composing_started_at' => time()
+                ]);
+
+                $this->logger->debug('Starting character composition', [
+                    'panel_id' => $panelId,
+                    'background_url' => $panelState['background_url'],
+                    'character_count' => count($panelState['characters']),
+                    'characters' => array_map(fn($char) => [
+                        'id' => $char['id'],
+                        'status' => $char['status'] ?? 'unknown'
+                    ], $panelState['characters'])
+                ]);
+
+                // Initialize ImageComposer
                 $imageComposer = new ImageComposer($this->logger, $this->config);
+
+                $this->logger->debug('Composing panel image', [
+                    'panel_id' => $panelId,
+                    'description' => $panelState['description'] ?? 'no description',
+                    'options' => $panelState['options'] ?? []
+                ]);
+
+                // Compose the panel image
                 $composedPath = $imageComposer->composePanelImage(
-                    $stripState['characters'],
+                    $panelState['characters'],
                     $panelState['description'],
                     $panelState['options'] ?? []
                 );
 
-                $this->stateManager->updatePanelState($panelId, [
-                    'status' => 'completed',
+                $this->logger->info('Panel image composition completed', [
+                    'panel_id' => $panelId,
                     'output_path' => $composedPath,
-                    'completed_at' => time()
+                    'previous_state' => $panelState
                 ]);
-            } catch (Exception $e) {
+
+                // Update panel state
                 $this->stateManager->updatePanelState($panelId, [
-                    'status' => 'failed',
+                    'status' => StateManager::PANEL_STATE_COMPLETE,
+                    'output_path' => $composedPath,
+                    'completed_at' => time(),
+                    'progress' => 100
+                ]);
+
+                $updatedState = $this->stateManager->getPanelState($panelId);
+                $this->logger->debug('Panel state updated after composition', [
+                    'panel_id' => $panelId,
+                    'new_state' => $updatedState,
+                    'status' => $updatedState['status'],
+                    'progress' => $updatedState['progress']
+                ]);
+
+                // Check if all panels are completed
+                if (isset($panelState['strip_id'])) {
+                    $stripState = $this->stateManager->getStripState($panelState['strip_id']);
+                    if ($stripState) {
+                        $totalPanels = count($stripState['panels'] ?? []);
+                        $completedPanels = count(array_filter(
+                            $stripState['panels'] ?? [],
+                            fn($panel) => $panel['status'] === StateManager::PANEL_STATE_COMPLETE
+                        ));
+
+                        $this->logger->debug('Checking strip completion status', [
+                            'strip_id' => $panelState['strip_id'],
+                            'total_panels' => $totalPanels,
+                            'completed_panels' => $completedPanels,
+                            'all_completed' => ($completedPanels === $totalPanels)
+                        ]);
+
+                        if ($completedPanels === $totalPanels) {
+                            $this->logger->info('All panels completed for strip', [
+                                'strip_id' => $panelState['strip_id'],
+                                'total_panels' => $totalPanels
+                            ]);
+
+                            $this->stateManager->updateStripState($panelState['strip_id'], [
+                                'status' => StateManager::STATE_COMPLETE,
+                                'completed_at' => time(),
+                                'progress' => 100
+                            ]);
+                        }
+                    }
+                }
+            } catch (Exception $e) {
+                $this->logger->error('Character composition failed', [
+                    'panel_id' => $panelId,
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString(),
+                    'previous_state' => $panelState
+                ]);
+
+                $this->stateManager->updatePanelState($panelId, [
+                    'status' => StateManager::PANEL_STATE_FAILED,
                     'error' => 'Character composition failed: ' . $e->getMessage(),
                     'failed_at' => time()
                 ]);
+
                 throw $e;
             }
+        } else {
+            $this->logger->debug('Panel not ready for character composition', [
+                'panel_id' => $panelId,
+                'missing_requirements' => [
+                    'background_url' => !isset($panelState['background_url']),
+                    'characters' => !isset($panelState['characters']) || empty($panelState['characters']),
+                    'wrong_status' => ($panelState['status'] ?? '') !== StateManager::PANEL_STATE_BACKGROUND_READY
+                ],
+                'current_state' => $panelState
+            ]);
         }
     }
 }

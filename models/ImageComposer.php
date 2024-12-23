@@ -801,63 +801,101 @@ class ImageComposer
      */
     private function makeReplicateRequest(string $endpoint, array $data = [], string $method = 'POST'): array
     {
-        $url = 'https://api.replicate.com/v1/' . $endpoint;
-        $token = $this->config->get('replicate.api_token');
+        try {
+            $url = 'https://api.replicate.com/v1/' . $endpoint;
+            $token = $this->config->get('replicate.api_token');
 
-        $this->logger->debug('Making Replicate API request', [
-            'endpoint' => $endpoint,
-            'method' => $method,
-            'has_webhook' => isset($data['webhook']),
-            'webhook_url' => $data['webhook'] ?? null,
-            'webhook_events' => $data['webhook_events_filter'] ?? []
-        ]);
+            if (!$token) {
+                throw new Exception('Replicate API token not configured');
+            }
 
-        $ch = curl_init($url);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, [
-            'Authorization: Token ' . $token,
-            'Content-Type: application/json'
-        ]);
-
-        if ($method === 'POST') {
-            // Get base model parameters from config
-            $modelParams = $this->config->get('replicate.models.sdxl.params');
-
-            // Merge with provided data, allowing overrides
-            $data['input'] = array_merge($modelParams, $data['input'] ?? []);
-
-            // Add negative prompts from config
-            $negativePrompts = $this->config->get('negative_prompts');
-            $data['input']['negative_prompt'] = implode(', ', $negativePrompts);
-
-            curl_setopt($ch, CURLOPT_POST, true);
-            curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
-        }
-
-        $response = curl_exec($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
-
-        if ($httpCode !== 200 && $httpCode !== 201) {
-            $this->logger->error('Replicate API request failed', [
+            $this->logger->debug('Preparing Replicate API request', [
                 'endpoint' => $endpoint,
                 'method' => $method,
-                'http_code' => $httpCode,
-                'response' => $response
+                'url' => $url,
+                'has_data' => !empty($data),
+                'data_keys' => $data ? array_keys($data) : []
             ]);
-            throw new Exception('Replicate API request failed: ' . $response);
+
+            $ch = curl_init();
+            curl_setopt($ch, CURLOPT_URL, $url);
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+            curl_setopt($ch, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_1_1);
+            curl_setopt($ch, CURLOPT_HTTPHEADER, [
+                'Authorization: Token ' . $token,
+                'Content-Type: application/json'
+            ]);
+
+            if ($method === 'POST') {
+                curl_setopt($ch, CURLOPT_POST, true);
+                curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
+            }
+
+            $response = curl_exec($ch);
+            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $error = curl_error($ch);
+            $errorNo = curl_errno($ch);
+
+            $this->logger->debug('Replicate API response received', [
+                'endpoint' => $endpoint,
+                'http_code' => $httpCode,
+                'has_response' => !empty($response),
+                'curl_error' => $error,
+                'curl_errno' => $errorNo
+            ]);
+
+            curl_close($ch);
+
+            if ($error) {
+                throw new Exception('Curl error: ' . $error);
+            }
+
+            if ($httpCode >= 400) {
+                $this->logger->error('Replicate API error response', [
+                    'endpoint' => $endpoint,
+                    'http_code' => $httpCode,
+                    'response' => $response
+                ]);
+                throw new Exception('API request failed with status ' . $httpCode);
+            }
+
+            $result = json_decode($response, true);
+            if (!$result) {
+                $this->logger->error('Failed to parse Replicate API response', [
+                    'endpoint' => $endpoint,
+                    'response' => $response,
+                    'json_error' => json_last_error_msg()
+                ]);
+                throw new Exception('Invalid JSON response from API');
+            }
+
+            if (isset($result['error'])) {
+                $this->logger->error('Replicate API returned error', [
+                    'endpoint' => $endpoint,
+                    'error' => $result['error'],
+                    'detail' => $result['detail'] ?? null
+                ]);
+                throw new Exception($result['error']);
+            }
+
+            $this->logger->debug('Replicate API request successful', [
+                'endpoint' => $endpoint,
+                'response_keys' => array_keys($result),
+                'status' => $result['status'] ?? null,
+                'has_output' => isset($result['output']),
+                'has_error' => isset($result['error'])
+            ]);
+
+            return $result;
+        } catch (Exception $e) {
+            $this->logger->error('Replicate API request failed', [
+                'endpoint' => $endpoint,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            throw $e;
         }
-
-        $responseData = json_decode($response, true);
-        $this->logger->debug('Replicate API response received', [
-            'endpoint' => $endpoint,
-            'method' => $method,
-            'http_code' => $httpCode,
-            'prediction_id' => $responseData['id'] ?? null,
-            'status' => $responseData['status'] ?? null
-        ]);
-
-        return $responseData;
     }
 
     /**
@@ -1216,6 +1254,13 @@ class ImageComposer
             // Get base parameters from config
             $baseParams = $this->config->get('replicate.models.sdxl.params');
 
+            // Ensure webhook URL is properly configured
+            $webhookUrl = rtrim($this->config->getBaseUrl(), '/') . '/webhook.php';
+            $this->logger->debug('Configuring SDXL webhook', [
+                'webhook_url' => $webhookUrl,
+                'events' => ['completed']
+            ]);
+
             // Prepare request data
             $requestData = [
                 'version' => $modelVersion,
@@ -1231,14 +1276,15 @@ class ImageComposer
                     'refine_steps' => 25,
                     'prompt_strength' => 0.8
                 ]),
-                'webhook' => $this->config->get('app.base_url') . '/webhook.php',
+                'webhook' => $webhookUrl,
                 'webhook_events_filter' => ['completed']
             ];
 
             $this->logger->info('Generating background with SDXL', [
                 'prompt' => $backgroundPrompt,
                 'model_version' => $modelVersion,
-                'parameters' => $requestData['input']
+                'parameters' => $requestData['input'],
+                'webhook_url' => $webhookUrl
             ]);
 
             // Make API request
