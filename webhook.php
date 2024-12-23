@@ -24,22 +24,49 @@ class WebhookHandler
     public function handleWebhook(): void
     {
         try {
-            // Log raw request data
-            $rawInput = file_get_contents('php://input');
-            $this->logger->info('Raw webhook data received', [
-                'data' => $rawInput,
-                'headers' => getallheaders(),
-                'method' => $_SERVER['REQUEST_METHOD']
+            // Log request details
+            $this->logger->debug('Webhook request received', [
+                'timestamp' => date('Y-m-d H:i:s'),
+                'request_method' => $_SERVER['REQUEST_METHOD'],
+                'remote_addr' => $_SERVER['REMOTE_ADDR'],
+                'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? 'not set',
+                'content_type' => $_SERVER['CONTENT_TYPE'] ?? 'not set',
+                'content_length' => $_SERVER['CONTENT_LENGTH'] ?? 'not set',
+                'query_params' => $_GET,
+                'server_info' => [
+                    'software' => $_SERVER['SERVER_SOFTWARE'] ?? 'unknown',
+                    'protocol' => $_SERVER['SERVER_PROTOCOL'] ?? 'unknown',
+                    'request_time' => $_SERVER['REQUEST_TIME'] ?? 'unknown'
+                ]
             ]);
 
+            // Log raw request data
+            $rawInput = file_get_contents('php://input');
+            $this->logger->debug('Raw webhook payload received', [
+                'data' => $rawInput,
+                'length' => strlen($rawInput),
+                'headers' => getallheaders()
+            ]);
 
             // Get webhook payload
             $payload = json_decode($rawInput, true);
             if (!$payload) {
-                throw new Exception('Invalid webhook payload');
+                $jsonError = json_last_error_msg();
+                $this->logger->error('Failed to parse webhook payload', [
+                    'error' => $jsonError,
+                    'raw_input_preview' => substr($rawInput, 0, 1000) // First 1000 chars for debugging
+                ]);
+                throw new Exception('Invalid webhook payload: ' . $jsonError);
             }
 
-            $this->logger->info('Received webhook', ['payload' => $payload]);
+            $this->logger->debug('Parsed webhook payload', [
+                'payload' => $payload,
+                'prediction_id' => $payload['id'] ?? 'not set',
+                'status' => $payload['status'] ?? 'not set',
+                'version' => $payload['version'] ?? 'not set',
+                'has_output' => isset($payload['output']),
+                'has_error' => isset($payload['error'])
+            ]);
 
             // Extract prediction details
             $predictionId = $payload['id'] ?? null;
@@ -97,6 +124,13 @@ class WebhookHandler
         $predictionId = $payload['id'];
         $status = $payload['status'];
         $output = $payload['output'] ?? null;
+
+        $this->logger->debug('Processing cartoonify webhook', [
+            'prediction_id' => $predictionId,
+            'status' => $status,
+            'has_output' => !empty($output),
+            'timestamp' => date('Y-m-d H:i:s')
+        ]);
 
         // Use a transaction-like approach for state updates
         $lockFile = $this->config->get('paths.temp') . "/webhook_{$predictionId}.lock";
@@ -173,6 +207,14 @@ class WebhookHandler
         $status = $payload['status'];
         $output = $payload['output'] ?? null;
         $error = $payload['error'] ?? null;
+
+        $this->logger->debug('Processing SDXL webhook', [
+            'prediction_id' => $predictionId,
+            'status' => $status,
+            'has_output' => !empty($output),
+            'has_error' => !empty($error),
+            'timestamp' => date('Y-m-d H:i:s')
+        ]);
 
         // Find associated panel state
         $panelStates = glob($this->config->get('paths.temp') . '/state_panel_*.json');

@@ -154,39 +154,26 @@ class CharacterProcessor
 
     private function startCartoonification(string $imagePath, string $characterId): array
     {
-        $this->logger->info('Starting cartoonification', [
-            'character_id' => $characterId,
-            'image_path' => $imagePath
-        ]);
-
         try {
-            // Get image URL from saved data
-            $generatedPath = basename($this->config->getOutputPath());
-            $imageData = [
-                'path' => $imagePath,
-                'filename' => basename($imagePath),
-                'url' => rtrim($this->config->getBaseUrl(), '/') . '/' . $generatedPath . '/' . basename($imagePath)
-            ];
-
-            // Validate image file
-            if (!file_exists($imagePath)) {
-                throw new Exception('Image file does not exist: ' . $imagePath);
-            }
-
-            if (!is_readable($imagePath)) {
-                throw new Exception('Image file is not readable: ' . $imagePath);
-            }
-
-            // Validate image content
+            // Validate image
             $imageInfo = getimagesize($imagePath);
             if (!$imageInfo) {
-                throw new Exception('Invalid image file or format');
+                throw new Exception('Invalid image file');
             }
 
-            $this->logger->info('Image validation passed', [
-                'mime_type' => $imageInfo['mime'],
-                'dimensions' => [$imageInfo[0], $imageInfo[1]],
-                'url' => $imageData['url']
+            $imageData = [
+                'path' => $imagePath,
+                'url' => $this->getImageUrl($imagePath)
+            ];
+
+            $this->logger->debug('Starting cartoonification', [
+                'character_id' => $characterId,
+                'image_info' => [
+                    'path' => $imagePath,
+                    'url' => $imageData['url'],
+                    'mime' => $imageInfo['mime'],
+                    'dimensions' => [$imageInfo[0], $imageInfo[1]]
+                ]
             ]);
 
             // Create prediction with retry logic
@@ -209,14 +196,10 @@ class CharacterProcessor
                         'character_id' => $characterId
                     ]);
 
-                    if (!isset($prediction['id'])) {
-                        throw new Exception('Invalid prediction response: missing ID');
-                    }
-
-                    $this->logger->info('Cartoonification prediction created', [
+                    $this->logger->debug('Cartoonification prediction created', [
                         'prediction_id' => $prediction['id'],
                         'character_id' => $characterId,
-                        'attempt' => $attempt + 1
+                        'status' => $prediction['status'] ?? 'unknown'
                     ]);
 
                     return $prediction;
@@ -224,7 +207,7 @@ class CharacterProcessor
                     $lastError = $e;
                     $this->logger->error('Cartoonification attempt failed', [
                         'attempt' => $attempt + 1,
-                        'character_id' => $characterId,
+                        'max_retries' => $maxRetries,
                         'error' => $e->getMessage()
                     ]);
                 }
@@ -248,5 +231,16 @@ class CharacterProcessor
         if (!file_put_contents($pendingFile, json_encode($data))) {
             throw new Exception('Failed to create pending file');
         }
+    }
+
+    /**
+     * Get the public URL for an image file
+     * @param string $imagePath Local path to the image
+     * @return string Public URL for the image
+     */
+    private function getImageUrl(string $imagePath): string
+    {
+        $generatedPath = basename($this->config->getOutputPath());
+        return rtrim($this->config->getBaseUrl(), '/') . '/' . $generatedPath . '/' . basename($imagePath);
     }
 }

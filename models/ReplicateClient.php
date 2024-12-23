@@ -20,7 +20,10 @@ class ReplicateClient
 
     public function createPrediction(array $input): array
     {
-        $this->logger->info('Creating prediction', ['input' => $input]);
+        $this->logger->debug('Creating prediction', [
+            'input' => $input,
+            'webhook_url' => $this->config->getBaseUrl() . '/webhook.php'
+        ]);
 
         // Get model version from config
         $modelConfig = $this->config->get('replicate.models.cartoonify');
@@ -44,6 +47,13 @@ class ReplicateClient
         if (!isset($response['id'])) {
             throw new Exception('Invalid prediction response');
         }
+
+        $this->logger->debug('Prediction created successfully', [
+            'prediction_id' => $response['id'],
+            'status' => $response['status'] ?? 'unknown',
+            'webhook_configured' => true,
+            'webhook_url' => $webhookUrl
+        ]);
 
         return $response;
     }

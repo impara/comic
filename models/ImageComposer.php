@@ -661,7 +661,8 @@ class ImageComposer
                     'high_noise_frac' => 0.8,
                     'refine_steps' => 25
                 ],
-                'webhook_completed' => $this->config->getBaseUrl() . '/webhook.php'
+                'webhook' => $this->config->getBaseUrl() . '/webhook.php',
+                'webhook_events_filter' => ['completed']
             ]);
 
             // Poll for completion
@@ -803,6 +804,14 @@ class ImageComposer
         $url = 'https://api.replicate.com/v1/' . $endpoint;
         $token = $this->config->get('replicate.api_token');
 
+        $this->logger->debug('Making Replicate API request', [
+            'endpoint' => $endpoint,
+            'method' => $method,
+            'has_webhook' => isset($data['webhook']),
+            'webhook_url' => $data['webhook'] ?? null,
+            'webhook_events' => $data['webhook_events_filter'] ?? []
+        ]);
+
         $ch = curl_init($url);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_HTTPHEADER, [
@@ -830,10 +839,25 @@ class ImageComposer
         curl_close($ch);
 
         if ($httpCode !== 200 && $httpCode !== 201) {
+            $this->logger->error('Replicate API request failed', [
+                'endpoint' => $endpoint,
+                'method' => $method,
+                'http_code' => $httpCode,
+                'response' => $response
+            ]);
             throw new Exception('Replicate API request failed: ' . $response);
         }
 
-        return json_decode($response, true);
+        $responseData = json_decode($response, true);
+        $this->logger->debug('Replicate API response received', [
+            'endpoint' => $endpoint,
+            'method' => $method,
+            'http_code' => $httpCode,
+            'prediction_id' => $responseData['id'] ?? null,
+            'status' => $responseData['status'] ?? null
+        ]);
+
+        return $responseData;
     }
 
     /**
@@ -1207,7 +1231,8 @@ class ImageComposer
                     'refine_steps' => 25,
                     'prompt_strength' => 0.8
                 ]),
-                'webhook_completed' => $this->config->get('app.base_url') . '/webhook.php'
+                'webhook' => $this->config->get('app.base_url') . '/webhook.php',
+                'webhook_events_filter' => ['completed']
             ];
 
             $this->logger->info('Generating background with SDXL', [
