@@ -5,145 +5,93 @@ require_once __DIR__ . '/../interfaces/LoggerInterface.php';
 class HttpClient
 {
     private LoggerInterface $logger;
-    private string $apiKey;
+    private string $apiToken;
+    private array $defaultHeaders;
 
-    public function __construct(LoggerInterface $logger, string $apiKey)
+    public function __construct(LoggerInterface $logger, string $apiToken)
     {
         $this->logger = $logger;
-        $this->apiKey = $apiKey;
+        $this->apiToken = $apiToken;
+        $this->defaultHeaders = [
+            'Authorization' => 'Token ' . $apiToken,
+            'Content-Type' => 'application/json'
+        ];
     }
 
-    /**
-     * Makes an HTTP request with proper error logging
-     *
-     * @param string $endpoint The URL to make the request to
-     * @param array $payload The data to send (for POST requests)
-     * @param string $method The HTTP method (GET, POST, etc.)
-     * @return array The decoded response data
-     * @throws Exception If the request fails or returns an error status
-     */
-    public function request(string $endpoint, array $payload = [], string $method = 'POST'): array
+    public function request(string $method, string $url, array $options = []): array
     {
-        try {
-            $ch = curl_init($endpoint);
-            if ($ch === false) {
-                throw new RuntimeException('Failed to initialize cURL');
+        $ch = curl_init();
+
+        $headers = array_map(
+            fn($key, $value) => "$key: $value",
+            array_keys($options['headers'] ?? $this->defaultHeaders),
+            array_values($options['headers'] ?? $this->defaultHeaders)
+        );
+
+        $postData = null;
+        if (isset($options['json'])) {
+            $postData = json_encode($options['json']);
+            if ($postData === false) {
+                throw new RuntimeException('Failed to encode request data: ' . json_last_error_msg());
             }
+        }
 
-            $headers = [
-                'Authorization: Token ' . $this->apiKey,
-                'Content-Type: application/json'
-            ];
+        curl_setopt_array($ch, [
+            CURLOPT_URL => $url,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HTTPHEADER => $headers,
+            CURLOPT_CUSTOMREQUEST => $method,
+            CURLOPT_POSTFIELDS => $postData,
+            CURLOPT_TIMEOUT => 30
+        ]);
 
-            curl_setopt_array($ch, [
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_HTTPHEADER => $headers,
-                CURLOPT_CUSTOMREQUEST => $method
-            ]);
+        $this->logger->debug('Making HTTP request', [
+            'method' => $method,
+            'url' => $url,
+            'headers' => $headers,
+            'data_length' => $postData ? strlen($postData) : 0
+        ]);
 
-            if ($method === 'POST' && !empty($payload)) {
-                curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
-            }
+        $response = curl_exec($ch);
+        $statusCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $error = curl_error($ch);
+        $errno = curl_errno($ch);
 
-            $response = curl_exec($ch);
-            if ($response === false) {
-                throw new RuntimeException('cURL error: ' . curl_error($ch));
-            }
+        curl_close($ch);
 
-            $statusCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            curl_close($ch);
-
-            $responseData = json_decode($response, true);
-            if (json_last_error() !== JSON_ERROR_NONE) {
-                throw new RuntimeException('Invalid JSON response: ' . json_last_error_msg());
-            }
-
-            if ($statusCode >= 400) {
-                $this->logger->error('Unprocessable Entity Error', [
-                    'endpoint' => $endpoint,
-                    'method' => $method,
-                    'payload' => $payload,
-                    'response' => $responseData,
-                    'error_message' => $responseData['detail'] ?? 'Unknown error'
-                ]);
-                throw new RuntimeException($responseData['detail'] ?? 'API request failed');
-            }
-
-            return $responseData;
-        } catch (Exception $e) {
+        if ($response === false) {
             $this->logger->error('HTTP request failed', [
-                'endpoint' => $endpoint,
-                'method' => $method,
-                'error' => $e->getMessage()
+                'error' => $error,
+                'errno' => $errno,
+                'url' => $url
             ]);
-            throw $e;
-        }
-    }
-
-    /**
-     * Extracts a meaningful error message from Replicate's error response
-     *
-     * @param array|null $responseData The decoded response data
-     * @return string A meaningful error message
-     */
-    private function extractErrorMessage(?array $responseData): string
-    {
-        if (!$responseData) {
-            return "No response data available";
+            throw new RuntimeException("HTTP request failed: $error");
         }
 
-        // Handle Replicate's detailed error format
-        if (isset($responseData['detail'])) {
-            if (is_array($responseData['detail'])) {
-                // Handle validation errors array
-                $errors = array_map(function ($error) {
-                    return isset($error['loc'])
-                        ? "{$error['msg']} at " . implode('.', $error['loc'])
-                        : $error['msg'];
-                }, $responseData['detail']);
-                return implode('; ', $errors);
-            }
-            return $responseData['detail'];
+        $data = json_decode($response, true);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            $this->logger->error('Failed to decode response', [
+                'error' => json_last_error_msg(),
+                'response' => substr($response, 0, 1000)
+            ]);
+            throw new RuntimeException('Invalid JSON response: ' . json_last_error_msg());
         }
 
-        // Handle simple error message
-        if (isset($responseData['error'])) {
-            return is_string($responseData['error'])
-                ? $responseData['error']
-                : json_encode($responseData['error']);
+        if ($statusCode >= 400) {
+            $this->logger->error('HTTP request failed', [
+                'status_code' => $statusCode,
+                'response' => $data,
+                'url' => $url
+            ]);
+            throw new RuntimeException("HTTP request failed with status $statusCode: " .
+                ($data['error'] ?? 'Unknown error'));
         }
 
-        // Handle nested errors
-        if (isset($responseData['errors']) && is_array($responseData['errors'])) {
-            return implode('; ', array_map(function ($error) {
-                return is_string($error) ? $error : json_encode($error);
-            }, $responseData['errors']));
-        }
+        $this->logger->debug('HTTP request completed', [
+            'status_code' => $statusCode,
+            'response_length' => strlen($response)
+        ]);
 
-        // Fallback for unknown error format
-        return json_encode($responseData);
-    }
-
-    /**
-     * Makes a POST request
-     * @param string $endpoint The endpoint to post to
-     * @param array $payload The data to send
-     * @return array The decoded response data
-     * @throws Exception If the request fails
-     */
-    public function post(string $endpoint, array $payload): array
-    {
-        return $this->request($endpoint, $payload, 'POST');
-    }
-
-    /**
-     * Make a GET request to the specified endpoint
-     * @param string $endpoint The endpoint to get from
-     * @return array The decoded response data
-     * @throws Exception If the request fails
-     */
-    public function get(string $endpoint): array
-    {
-        return $this->request($endpoint, [], 'GET');
+        return $data;
     }
 }

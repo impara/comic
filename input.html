@@ -504,6 +504,156 @@
             </div>
         `;
     </script>
+
+    <div class="modal fade" id="generationModal" data-bs-backdrop="static" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Generating Your Comic</h5>
+                </div>
+                <div class="modal-body">
+                    <div class="text-center mb-3">
+                        <div class="generation-status">Initializing...</div>
+                        <div class="progress mt-3">
+                            <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar"
+                                style="width: 0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">0%</div>
+                        </div>
+                    </div>
+                    <div class="error-message text-danger text-center" style="display: none;"></div>
+                    <div class="success-message text-center" style="display: none;">
+                        <img src="" alt="Generated Comic" class="img-fluid mb-3 generated-comic" style="display: none;">
+                        <div class="alert alert-success">Your comic has been generated successfully!</div>
+                    </div>
+                </div>
+                <div class="modal-footer" style="display: none;">
+                    <button type="button" class="btn btn-primary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentJobId = null;
+        let pollingInterval = null;
+
+        async function generateComic(formData) {
+            try {
+                const response = await fetch('api.php', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+                if (!data.success || !data.jobId) {
+                    throw new Error(data.error || 'Failed to start comic generation');
+                }
+
+                return data.jobId;
+            } catch (error) {
+                throw new Error('Failed to start comic generation: ' + error.message);
+            }
+        }
+
+        async function checkStatus(jobId) {
+            try {
+                const response = await fetch(`api.php?action=status&jobId=${jobId}`);
+                return await response.json();
+            } catch (error) {
+                throw new Error('Failed to check status: ' + error.message);
+            }
+        }
+
+        function updateProgressUI(status, progress) {
+            const progressBar = document.querySelector('#generationModal .progress-bar');
+            const statusText = document.querySelector('#generationModal .generation-status');
+            const errorMessage = document.querySelector('#generationModal .error-message');
+            const successMessage = document.querySelector('#generationModal .success-message');
+            const modalFooter = document.querySelector('#generationModal .modal-footer');
+            const generatedComic = document.querySelector('#generationModal .generated-comic');
+
+            // Update progress bar
+            progressBar.style.width = `${progress}%`;
+            progressBar.setAttribute('aria-valuenow', progress);
+            progressBar.textContent = `${Math.round(progress)}%`;
+
+            // Update status message
+            switch (status) {
+                case 'processing':
+                    statusText.textContent = 'Generating your comic...';
+                    errorMessage.style.display = 'none';
+                    successMessage.style.display = 'none';
+                    break;
+
+                case 'completed':
+                    statusText.style.display = 'none';
+                    errorMessage.style.display = 'none';
+                    successMessage.style.display = 'block';
+                    modalFooter.style.display = 'block';
+                    if (data.output_url) {
+                        generatedComic.src = data.output_url;
+                        generatedComic.style.display = 'block';
+                    }
+                    clearInterval(pollingInterval);
+                    break;
+
+                case 'failed':
+                    statusText.style.display = 'none';
+                    errorMessage.textContent = data.error || 'Failed to generate comic';
+                    errorMessage.style.display = 'block';
+                    modalFooter.style.display = 'block';
+                    clearInterval(pollingInterval);
+                    break;
+            }
+        }
+
+        async function startPolling(jobId) {
+            if (pollingInterval) {
+                clearInterval(pollingInterval);
+            }
+
+            pollingInterval = setInterval(async () => {
+                try {
+                    const data = await checkStatus(jobId);
+                    updateProgressUI(data.status, data.progress || 0);
+
+                    if (data.status === 'completed' || data.status === 'failed') {
+                        clearInterval(pollingInterval);
+                    }
+                } catch (error) {
+                    console.error('Polling error:', error);
+                    updateProgressUI('failed', 0);
+                    clearInterval(pollingInterval);
+                }
+            }, 3000); // Poll every 3 seconds
+        }
+
+        // Update your form submission handler
+        document.getElementById('comicForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            // Show generation modal
+            const modal = new bootstrap.Modal(document.getElementById('generationModal'));
+            modal.show();
+
+            // Reset UI
+            updateProgressUI('processing', 0);
+
+            try {
+                // Get form data
+                const formData = new FormData(e.target);
+
+                // Start comic generation
+                const jobId = await generateComic(formData);
+                currentJobId = jobId;
+
+                // Start polling for status
+                startPolling(jobId);
+            } catch (error) {
+                console.error('Generation error:', error);
+                updateProgressUI('failed', 0);
+            }
+        });
+    </script>
 </body>
 
 </html>

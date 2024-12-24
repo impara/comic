@@ -1,39 +1,52 @@
 <?php
 
+require_once __DIR__ . '/../interfaces/LoggerInterface.php';
+
 class CacheManager
 {
     private string $cachePath;
     private LoggerInterface $logger;
     private const CACHE_DURATION = 3600; // 1 hour default cache duration
+    private const CLEANUP_PROBABILITY = 0.01; // 1% chance of cleanup on each operation
 
     public function __construct(string $cachePath, LoggerInterface $logger)
     {
         $this->cachePath = rtrim($cachePath, '/');
         $this->logger = $logger;
+        $this->ensureCacheDirectory();
+    }
 
-        // Ensure cache directory exists
+    private function ensureCacheDirectory(): void
+    {
         if (!is_dir($this->cachePath)) {
-            mkdir($this->cachePath, 0755, true);
+            if (!mkdir($this->cachePath, 0775, true)) {
+                throw new RuntimeException("Failed to create cache directory: {$this->cachePath}");
+            }
+        }
+
+        if (!is_writable($this->cachePath)) {
+            throw new RuntimeException("Cache directory is not writable: {$this->cachePath}");
         }
     }
 
-    public function get(string $key, int $duration = self::CACHE_DURATION)
+    public function get(string $key, int $duration = self::CACHE_DURATION): mixed
     {
-        $cacheFile = $this->getCacheFilePath($key);
-
-        if (!file_exists($cacheFile)) {
-            return null;
-        }
+        $this->maybeCleanup();
 
         try {
-            $data = json_decode(file_get_contents($cacheFile), true);
-            if (!$data || !isset($data['timestamp']) || !isset($data['value'])) {
+            $cacheFile = $this->getCacheFilePath($key);
+            if (!file_exists($cacheFile)) {
                 return null;
             }
 
-            // Check if cache has expired
+            $data = $this->readCache($cacheFile);
+            if (!$data || !isset($data['timestamp']) || !isset($data['value'])) {
+                $this->delete($key);
+                return null;
+            }
+
             if (time() - $data['timestamp'] > $duration) {
-                @unlink($cacheFile);
+                $this->delete($key);
                 return null;
             }
 
@@ -52,36 +65,19 @@ class CacheManager
         }
     }
 
-    public function set(string $key, $value, int $duration = self::CACHE_DURATION): bool
+    public function set(string $key, mixed $value, int $duration = self::CACHE_DURATION): bool
     {
-        $cacheFile = $this->getCacheFilePath($key);
+        $this->maybeCleanup();
 
         try {
+            $cacheFile = $this->getCacheFilePath($key);
             $data = [
                 'timestamp' => time(),
-                'value' => $value,
-                'expires' => time() + $duration
+                'expires' => time() + $duration,
+                'value' => $value
             ];
 
-            // Use atomic write
-            $tempFile = $cacheFile . '.tmp';
-            if (file_put_contents($tempFile, json_encode($data)) === false) {
-                throw new Exception('Failed to write cache data');
-            }
-
-            if (!rename($tempFile, $cacheFile)) {
-                @unlink($tempFile);
-                throw new Exception('Failed to rename cache file');
-            }
-
-            chmod($cacheFile, 0644);
-
-            $this->logger->debug('Cache set', [
-                'key' => $key,
-                'expires_in' => $duration
-            ]);
-
-            return true;
+            return $this->writeCache($cacheFile, $data);
         } catch (Exception $e) {
             $this->logger->error('Cache write error', [
                 'key' => $key,
@@ -93,11 +89,19 @@ class CacheManager
 
     public function delete(string $key): bool
     {
-        $cacheFile = $this->getCacheFilePath($key);
-        if (file_exists($cacheFile)) {
-            return @unlink($cacheFile);
+        try {
+            $cacheFile = $this->getCacheFilePath($key);
+            if (file_exists($cacheFile)) {
+                return unlink($cacheFile);
+            }
+            return true;
+        } catch (Exception $e) {
+            $this->logger->error('Cache delete error', [
+                'key' => $key,
+                'error' => $e->getMessage()
+            ]);
+            return false;
         }
-        return true;
     }
 
     public function clear(): bool
@@ -106,7 +110,7 @@ class CacheManager
             $files = glob($this->cachePath . '/*');
             foreach ($files as $file) {
                 if (is_file($file)) {
-                    @unlink($file);
+                    unlink($file);
                 }
             }
             return true;
@@ -120,8 +124,71 @@ class CacheManager
 
     private function getCacheFilePath(string $key): string
     {
-        // Ensure key is safe for filesystem
         $safeKey = preg_replace('/[^a-zA-Z0-9_-]/', '_', $key);
         return $this->cachePath . '/' . $safeKey . '.cache';
+    }
+
+    private function readCache(string $cacheFile): ?array
+    {
+        $content = file_get_contents($cacheFile);
+        if ($content === false) {
+            return null;
+        }
+
+        $data = json_decode($content, true);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            return null;
+        }
+
+        return $data;
+    }
+
+    private function writeCache(string $cacheFile, array $data): bool
+    {
+        $tempFile = $cacheFile . '.tmp';
+        if (file_put_contents($tempFile, json_encode($data)) === false) {
+            return false;
+        }
+
+        if (!rename($tempFile, $cacheFile)) {
+            unlink($tempFile);
+            return false;
+        }
+
+        chmod($cacheFile, 0664);
+        return true;
+    }
+
+    private function maybeCleanup(): void
+    {
+        if (mt_rand() / mt_getrandmax() < self::CLEANUP_PROBABILITY) {
+            $this->cleanup();
+        }
+    }
+
+    private function cleanup(): void
+    {
+        try {
+            $files = glob($this->cachePath . '/*');
+            $now = time();
+
+            foreach ($files as $file) {
+                if (!is_file($file)) {
+                    continue;
+                }
+
+                $data = $this->readCache($file);
+                if (!$data || !isset($data['expires']) || $now > $data['expires']) {
+                    unlink($file);
+                    $this->logger->debug('Removed expired cache file', [
+                        'file' => basename($file)
+                    ]);
+                }
+            }
+        } catch (Exception $e) {
+            $this->logger->error('Cache cleanup error', [
+                'error' => $e->getMessage()
+            ]);
+        }
     }
 }

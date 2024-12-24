@@ -7,29 +7,45 @@ class Config
     private static ?Config $instance = null;
     private array $config;
     private array $env;
+    private static bool $initialized = false;
+    private ?string $cachedBaseUrl = null;
+    private ?string $environment = null;
 
-    public function __construct()
+    private function __construct()
     {
-        // Force environment reload
-        $this->loadEnv();
+        if (!self::$initialized) {
+            // Force environment reload
+            $this->loadEnv();
 
-        // Store environment variables
-        $this->env = $_ENV;
+            // Store environment variables
+            $this->env = $_ENV;
 
-        // Load configuration file
-        $this->config = require __DIR__ . '/../config/config.php';
+            // Load configuration file
+            $this->config = require __DIR__ . '/../config/config.php';
 
-        // Override config with environment variables
-        $this->loadConfig();
+            // Override config with environment variables
+            $this->loadConfig();
 
-        // Debug environment loading
-        error_log("DEBUG_VERIFY - Config initialized: " . json_encode([
-            'env_log_level' => $this->getEnv('LOG_LEVEL'),
-            'env_app_log_level' => $this->getEnv('APP_LOG_LEVEL'),
-            'env_app_debug' => $this->getEnv('APP_DEBUG'),
-            'config_debug' => $this->isDebugMode(),
-            'config_log_level' => $this->getLogLevel()
-        ]));
+            // Debug environment loading - only log once during initialization
+            error_log("DEBUG_VERIFY - Config initialized: " . json_encode([
+                'env_log_level' => $this->getEnv('LOG_LEVEL'),
+                'env_app_log_level' => $this->getEnv('APP_LOG_LEVEL'),
+                'env_app_debug' => $this->getEnv('APP_DEBUG'),
+                'config_debug' => $this->isDebugMode(),
+                'config_log_level' => $this->getLogLevel()
+            ]));
+
+            self::$initialized = true;
+        }
+    }
+
+    // Prevent cloning of the instance
+    private function __clone() {}
+
+    // Prevent unserializing of the instance
+    public function __wakeup()
+    {
+        throw new Exception('Cannot unserialize singleton');
     }
 
     private function loadEnv(): void
@@ -75,6 +91,9 @@ class Config
         if (isset($this->env['APP_DEBUG'])) {
             $this->config['app']['debug'] = $this->env['APP_DEBUG'] === 'true';
         }
+        if (isset($this->env['APP_LOG_LEVEL'])) {
+            $this->config['app']['log_level'] = strtolower($this->env['APP_LOG_LEVEL']);
+        }
         if (isset($this->env['APP_BASE_URL'])) {
             $this->config['app']['base_url'] = $this->env['APP_BASE_URL'];
         }
@@ -86,63 +105,88 @@ class Config
     public static function getInstance(): Config
     {
         if (self::$instance === null) {
-            self::$instance = new Config();
+            self::$instance = new self();
         }
         return self::$instance;
     }
 
     public function get(string $key, $default = null)
     {
-        $parts = explode('.', $key);
+        $keys = explode('.', $key);
         $value = $this->config;
 
-        foreach ($parts as $part) {
-            if (!isset($value[$part])) {
+        foreach ($keys as $k) {
+            if (!isset($value[$k])) {
                 return $default;
             }
-            $value = $value[$part];
+            $value = $value[$k];
         }
 
         return $value;
     }
 
+    /**
+     * Get Replicate API key with validation
+     * @throws Exception if API token is not configured
+     */
+    public function getReplicateApiKey(): string
+    {
+        // Try config first (which may be set from env in loadConfig)
+        $apiKey = $this->get('replicate.api_token');
+
+        // Fallback to direct env check if not in config
+        if (!$apiKey) {
+            $apiKey = getenv('REPLICATE_API_TOKEN');
+        }
+
+        // Final validation
+        if (!$apiKey) {
+            throw new Exception('REPLICATE_API_TOKEN not configured. Please set it in .env or environment variables.');
+        }
+
+        return $apiKey;
+    }
+
+    /**
+     * @deprecated Use getReplicateApiKey() instead
+     */
     public function getApiToken(): string
     {
-        $token = $this->get('replicate.api_token');
-        if (!$token) {
-            throw new RuntimeException('Replicate API token not configured');
+        try {
+            return $this->getReplicateApiKey();
+        } catch (Exception $e) {
+            return '';
         }
-        return $token;
     }
 
-    public function getOutputPath(): string
+    /**
+     * Get and validate a path from configuration
+     * @param string $type Path type (output, logs, temp, etc.)
+     * @param array $options Additional options (create_if_missing, validate_writable, etc.)
+     * @return string The validated and formatted path
+     * @throws RuntimeException if path is not configured or validation fails
+     */
+    public function getPath(string $type, array $options = []): string
     {
-        return $this->get('paths.output');
-    }
+        $options = array_merge([
+            'create_if_missing' => false,
+            'validate_writable' => true,
+            'trailing_slash' => true,
+            'permissions' => 0775
+        ], $options);
 
-    public function getLogsPath(): string
-    {
-        $path = $this->get('paths.logs');
+        $path = $this->get("paths.$type");
         if (!$path) {
-            throw new RuntimeException('Logs directory not configured');
-        }
-        return rtrim($path, '/') . '/';
-    }
-
-    public function getTempPath(): string
-    {
-        $path = $this->get('paths.temp');
-        if (!$path) {
-            throw new RuntimeException('Temp directory not configured');
+            throw new RuntimeException("Path not configured for: $type");
         }
 
-        $fullPath = rtrim($path, '/') . '/';
+        $fullPath = $options['trailing_slash'] ? rtrim($path, '/') . '/' : rtrim($path, '/');
 
-        // Create directory if it doesn't exist
-        if (!file_exists($fullPath)) {
-            if (!mkdir($fullPath, 0775, true)) {
-                error_log("Failed to create temp directory: $fullPath");
-                throw new RuntimeException("Failed to create temp directory: $fullPath");
+        // Create directory if it doesn't exist and creation is requested
+        if ($options['create_if_missing'] && !file_exists($fullPath)) {
+            if (!mkdir($fullPath, $options['permissions'], true)) {
+                error_log("Failed to create directory: $fullPath");
+                throw new RuntimeException("Failed to create directory: $fullPath");
             }
 
             // Set proper permissions
@@ -151,56 +195,199 @@ class Config
                 chgrp($fullPath, 'www-data');
             }
 
-            error_log("Created temp directory: $fullPath");
+            error_log("Created directory: $fullPath");
         }
 
-        // Check permissions
-        if (!is_writable($fullPath)) {
-            error_log("Temp directory is not writable: $fullPath");
+        // Validate writability if requested
+        if ($options['validate_writable'] && !is_writable($fullPath)) {
+            error_log("Directory is not writable: $fullPath");
             error_log("Permissions: " . substr(sprintf('%o', fileperms($fullPath)), -4));
             error_log("Owner: " . (function_exists('posix_getpwuid') ? posix_getpwuid(fileowner($fullPath))['name'] : 'unknown'));
             error_log("Group: " . (function_exists('posix_getgrgid') ? posix_getgrgid(filegroup($fullPath))['name'] : 'unknown'));
-            throw new RuntimeException("Temp directory is not writable: $fullPath");
+            throw new RuntimeException("Directory is not writable: $fullPath");
         }
 
         return $fullPath;
     }
 
+    /**
+     * @deprecated Use getPath('output') instead
+     */
+    public function getOutputPath(): string
+    {
+        return $this->getPath('output', ['create_if_missing' => false, 'validate_writable' => false]);
+    }
+
+    /**
+     * @deprecated Use getPath('logs') instead
+     */
+    public function getLogsPath(): string
+    {
+        return $this->getPath('logs', ['create_if_missing' => true]);
+    }
+
+    /**
+     * @deprecated Use getPath('temp') instead
+     */
+    public function getTempPath(): string
+    {
+        return $this->getPath('temp', ['create_if_missing' => true]);
+    }
+
+    /**
+     * Get the current environment (development, production, testing)
+     */
+    public function getEnvironment(): string
+    {
+        if ($this->environment === null) {
+            $this->environment = strtolower($this->getEnv('APP_ENV', 'production'));
+        }
+        return $this->environment;
+    }
+
+    /**
+     * Get the base URL with environment-aware handling
+     */
     public function getBaseUrl(): string
     {
-        // Use APP_BASE_URL from the environment if set
-        if (!empty($this->env['APP_BASE_URL'])) {
-            return $this->env['APP_BASE_URL'];
+        // Return cached URL if available
+        if ($this->cachedBaseUrl !== null) {
+            return $this->cachedBaseUrl;
         }
 
-        // Derive protocol and host from the request
-        $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on') ? 'https' : 'http';
+        // Priority 1: Environment variable override
+        if (!empty($this->env['APP_BASE_URL'])) {
+            $this->cachedBaseUrl = $this->env['APP_BASE_URL'];
+            return $this->cachedBaseUrl;
+        }
 
-        // Check for Cloudflare headers to determine the protocol
-        if (!empty($_SERVER['HTTP_CF_VISITOR'])) {
-            $cfVisitor = json_decode($_SERVER['HTTP_CF_VISITOR'], true);
-            if (!empty($cfVisitor['scheme'])) {
-                $protocol = $cfVisitor['scheme'];
+        // Priority 2: Config file value for production
+        if ($this->getEnvironment() === 'production') {
+            $configUrl = $this->get('app.base_url');
+            if ($configUrl) {
+                $this->cachedBaseUrl = $configUrl;
+                return $this->cachedBaseUrl;
             }
         }
 
-        $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+        // Priority 3: Development URL construction
+        if ($this->getEnvironment() === 'development') {
+            $port = $_SERVER['SERVER_PORT'] ?? '80';
+            $defaultHost = 'localhost' . ($port !== '80' && $port !== '443' ? ":$port" : '');
+        } else {
+            $defaultHost = 'localhost';
+        }
 
-        return $protocol . '://' . $host;
+        // Determine protocol
+        $protocol = 'http';
+
+        // Check HTTPS
+        if (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on') {
+            $protocol = 'https';
+        }
+
+        // Check for reverse proxy headers
+        $headers = [
+            'HTTP_X_FORWARDED_PROTO' => 'protocol',
+            'HTTP_X_FORWARDED_SSL' => 'ssl',
+            'HTTP_CF_VISITOR' => 'cloudflare'
+        ];
+
+        foreach ($headers as $header => $type) {
+            if (!empty($_SERVER[$header])) {
+                switch ($type) {
+                    case 'protocol':
+                        $protocol = $_SERVER[$header];
+                        break;
+                    case 'ssl':
+                        if ($_SERVER[$header] === 'on') {
+                            $protocol = 'https';
+                        }
+                        break;
+                    case 'cloudflare':
+                        $cfVisitor = json_decode($_SERVER[$header], true);
+                        if (!empty($cfVisitor['scheme'])) {
+                            $protocol = $cfVisitor['scheme'];
+                        }
+                        break;
+                }
+            }
+        }
+
+        // Get host
+        $host = $_SERVER['HTTP_HOST'] ?? $defaultHost;
+
+        // Cache and return the constructed URL
+        $this->cachedBaseUrl = $protocol . '://' . $host;
+        return $this->cachedBaseUrl;
     }
 
+    /**
+     * Get the application log level
+     * @return string The log level (DEBUG, INFO, WARNING, ERROR)
+     */
+    public function getLogLevel(): string
+    {
+        return strtoupper($this->get('app.log_level', 'INFO'));
+    }
+
+    /**
+     * Check if debug mode is enabled
+     * This is used for non-logging debug features
+     * @return bool
+     */
     public function isDebugMode(): bool
     {
         return (bool)$this->get('app.debug', false);
     }
 
+    /**
+     * Get model version from configuration
+     * @param string $model Model identifier (e.g., 'cartoonify', 'sdxl')
+     * @return string Model version
+     * @throws RuntimeException if model version not found
+     */
+    public function getModelVersion(string $model): string
+    {
+        $version = $this->get("replicate.models.$model.version");
+        if (!$version) {
+            throw new RuntimeException("Model version not found for: $model");
+        }
+        return $version;
+    }
+
+    /**
+     * Get model parameters from configuration
+     * @param string $model Model identifier (e.g., 'cartoonify', 'sdxl')
+     * @return array Model parameters
+     * @throws RuntimeException if model parameters not found
+     */
+    public function getModelParams(string $model): array
+    {
+        $params = $this->get("replicate.models.$model.params");
+        if (!$params) {
+            throw new RuntimeException("Model parameters not found for: $model");
+        }
+        return $params;
+    }
+
+    /**
+     * @deprecated Use getModelVersion('cartoonify') instead
+     */
+    public function getCartoonifyModel(): string
+    {
+        return $this->getModelVersion('cartoonify');
+    }
+
+    /**
+     * @deprecated Use getModelVersion() and getModelParams() instead
+     */
     public function getModelConfig(string $model): array
     {
-        $config = $this->get("replicate.models.$model");
-        if (!$config) {
-            throw new RuntimeException("Model configuration not found for: $model");
-        }
-        return $config;
+        return [
+            'version' => $this->getModelVersion($model),
+            'params' => $this->getModelParams($model)
+        ];
     }
 
     public function getNegativePrompts(): array
@@ -222,15 +409,18 @@ class Config
         return $config;
     }
 
-    public function getLogLevel()
-    {
-        // Default to INFO if not set
-        return $this->get('log_level', 'INFO');
-    }
-
     private function getDefaultConfig(): array
     {
         return [
+            'app' => [
+                'debug' => false,
+                'log_level' => 'info',
+                'base_url' => 'https://comic.amertech.online',
+            ],
+            'paths' => [
+                'output' => __DIR__ . '/../public/generated/',
+                'temp' => __DIR__ . '/../temp/',
+            ],
             'debug' => true,
             'log_level' => 'debug',
             'base_url' => 'https://comic.amertech.online',
@@ -256,5 +446,13 @@ class Config
                 ]
             ]
         ];
+    }
+
+    /**
+     * Get the background generation model ID
+     */
+    public function getBackgroundModel(): string
+    {
+        return $_ENV['BACKGROUND_MODEL'] ?? 'stability-ai/sdxl:39ed52f2a78e934b3ba6e2a89f5b1c712de7dfea535525255b1aa35c5565e08b';
     }
 }

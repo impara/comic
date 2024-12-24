@@ -1,93 +1,75 @@
 <?php
 
 require_once __DIR__ . '/../interfaces/LoggerInterface.php';
+require_once __DIR__ . '/Config.php';
 
 class Logger implements LoggerInterface
 {
     private string $logFile;
-    private int $maxFileSize;
-    private int $maxFiles;
+    private int $maxFileSize = 5242880; // 5MB
+    private int $maxFiles = 3;
     private string $logDir;
-    private array $logRates = [];
-    private int $rateLimit = 60; // seconds
-    private array $lastLogTimes = [];
-    private array $suppressedCounts = [];
+    private Config $config;
+    private array $logLevels = [
+        'DEBUG' => 0,
+        'INFO' => 1,
+        'WARNING' => 2,
+        'ERROR' => 3
+    ];
+    private string $logLevel;
+    private bool $debugMode;
 
-    public function __construct()
+    public function __construct(?Config $config = null)
     {
-        $config = Config::getInstance();
+        $this->config = $config ?? Config::getInstance();
+        $this->logFile = $this->config->getLogsPath() . 'app.log';
+        $this->logLevel = $this->config->getLogLevel();
+        $this->debugMode = $this->config->isDebugMode();
+        $this->logDir = dirname($this->logFile);
 
-        // Set paths based on environment
-        $isProduction = isset($_SERVER['SERVER_NAME']) && strpos($_SERVER['SERVER_NAME'], 'comic.amertech.online') !== false;
-
-        // Set paths based on environment
-        if ($isProduction) {
-            $this->logDir = '/var/www/comic.amertech.online/logs/';
-        } else {
-            $this->logDir = __DIR__ . '/../logs/';
+        // Ensure log directory exists
+        if (!file_exists($this->logDir)) {
+            if (!mkdir($this->logDir, 0775, true)) {
+                throw new RuntimeException("Failed to create log directory: {$this->logDir}");
+            }
         }
 
-        $this->logFile = $this->logDir . 'comic_generator.log';
-        $this->maxFileSize = 5 * 1024 * 1024; // 5MB
-        $this->maxFiles = 3;
+        // Ensure log file exists and is writable
+        if (!file_exists($this->logFile)) {
+            if (!touch($this->logFile)) {
+                throw new RuntimeException("Failed to create log file: {$this->logFile}");
+            }
+            chmod($this->logFile, 0664);
+        }
 
-        $this->ensureLogDirectory();
-
-        // Debug environment loading - moved after property initialization
-        $this->error('DEBUG_VERIFY - Environment Loading', [
-            'env_log_level' => getenv('LOG_LEVEL'),
-            'env_app_log_level' => getenv('APP_LOG_LEVEL'),
-            'env_app_debug' => getenv('APP_DEBUG'),
-            'config_debug_mode' => $config->isDebugMode(),
-            'config_log_level' => $config->getLogLevel(),
-            'env_vars' => $_ENV
-        ]);
+        if (!is_writable($this->logFile)) {
+            throw new RuntimeException("Log file is not writable: {$this->logFile}");
+        }
     }
 
     private function ensureLogDirectory(): void
     {
-        // Create directory if it doesn't exist
         if (!file_exists($this->logDir)) {
-            if (!mkdir($this->logDir, 0777, true)) {
-                error_log("Failed to create log directory: {$this->logDir}");
+            if (!mkdir($this->logDir, 0775, true)) {
                 throw new RuntimeException("Failed to create log directory: {$this->logDir}");
             }
-            // Set directory permissions
-            chmod($this->logDir, 0777);
-            // Only try to change owner in production
-            if (function_exists('posix_getuid') && posix_getuid() === 0) {
-                chown($this->logDir, 'www-data');
-                chgrp($this->logDir, 'www-data');
-            }
         }
 
-        // Create log file if it doesn't exist
         if (!file_exists($this->logFile)) {
-            if (touch($this->logFile)) {
-                // Set file permissions
-                chmod($this->logFile, 0666);
-                // Only try to change owner in production
-                if (function_exists('posix_getuid') && posix_getuid() === 0) {
-                    chown($this->logFile, 'www-data');
-                    chgrp($this->logFile, 'www-data');
-                }
-            } else {
-                error_log("Failed to create log file: {$this->logFile}");
+            if (!touch($this->logFile)) {
                 throw new RuntimeException("Failed to create log file: {$this->logFile}");
             }
+            chmod($this->logFile, 0664);
         }
 
-        // Double check permissions
         if (!is_writable($this->logFile)) {
-            error_log("Log file is not writable: {$this->logFile}");
             throw new RuntimeException("Log file is not writable: {$this->logFile}");
         }
     }
 
     public function debug(string $message, array $context = []): void
     {
-        // Only log debug in debug mode
-        if (Config::getInstance()->isDebugMode()) {
+        if ($this->shouldLog('DEBUG')) {
             $this->log('DEBUG', $message, $context);
         }
     }
@@ -107,27 +89,60 @@ class Logger implements LoggerInterface
         $this->log('ERROR', $message, $context);
     }
 
-    /**
-     * Filter sensitive or large data from log context
-     * @param array $context Original context array
-     * @return array Filtered context array
-     */
-    private function filterLogContext(array $context): array
+    private function log(string $level, string $message, array $context): void
+    {
+        if (!$this->shouldLog($level)) {
+            return;
+        }
+
+        try {
+            $this->rotateLogIfNeeded();
+
+            $timestamp = date('Y-m-d H:i:s');
+            $pid = getmypid();
+            $contextJson = !empty($context) ? ' ' . json_encode($this->filterContext($context)) : '';
+
+            $logMessage = sprintf(
+                "[%s] [%s] [PID:%d] %s%s\n",
+                $timestamp,
+                $level,
+                $pid,
+                $message,
+                $contextJson
+            );
+
+            if (file_put_contents($this->logFile, $logMessage, FILE_APPEND) === false) {
+                error_log("Failed to write to log file: {$this->logFile}");
+            }
+        } catch (Exception $e) {
+            error_log("Logging failed: " . $e->getMessage());
+        }
+    }
+
+    private function shouldLog(string $level): bool
+    {
+        $configLevel = strtoupper($this->config->getLogLevel());
+
+        if (!isset($this->logLevels[$level]) || !isset($this->logLevels[$configLevel])) {
+            return true; // Log if level is unknown
+        }
+
+        return $this->logLevels[$level] >= $this->logLevels[$configLevel];
+    }
+
+    private function filterContext(array $context): array
     {
         $filtered = [];
         foreach ($context as $key => $value) {
             if (is_array($value)) {
-                $filtered[$key] = $this->filterLogContext($value);
+                $filtered[$key] = $this->filterContext($value);
             } elseif (is_string($value)) {
-                // Check for base64 image data
                 if (preg_match('/^data:image\/[a-z]+;base64,/i', $value)) {
-                    $filtered[$key] = '[BASE64_IMAGE_DATA_REMOVED]';
-                } elseif (strlen($value) > 1000 && preg_match('/^[a-zA-Z0-9\/\r\n+]*={0,2}$/', $value)) {
-                    // Likely base64 data without mime type
-                    $filtered[$key] = '[LARGE_BASE64_DATA_REMOVED]';
+                    $filtered[$key] = '[BASE64_IMAGE_DATA]';
+                } elseif (strlen($value) > 1000) {
+                    $filtered[$key] = '[LARGE_DATA_TRUNCATED]';
                 } else {
-                    // Truncate long strings
-                    $filtered[$key] = strlen($value) > 500 ? substr($value, 0, 500) . '...' : $value;
+                    $filtered[$key] = $value;
                 }
             } else {
                 $filtered[$key] = $value;
@@ -136,162 +151,22 @@ class Logger implements LoggerInterface
         return $filtered;
     }
 
-    private function shouldLog(string $level, string $message): bool
-    {
-        // Always log test and debug verification messages
-        if (str_starts_with($message, 'DEBUG_VERIFY')) {
-            return true;
-        }
-
-        // Always log errors
-        if ($level === 'ERROR') {
-            return true;
-        }
-
-        $config = Config::getInstance();
-
-        // Get log level with precedence:
-        // 1. LOG_LEVEL from env
-        // 2. APP_LOG_LEVEL from env
-        // 3. Default to INFO
-        $configLevel = strtoupper(
-            getenv('LOG_LEVEL') ?:
-                getenv('APP_LOG_LEVEL') ?:
-                'INFO'
-        );
-
-        $logLevels = [
-            'DEBUG' => 0,
-            'INFO' => 1,
-            'WARNING' => 2,
-            'ERROR' => 3
-        ];
-
-        // If debug mode is enabled, log everything
-        if ($config->isDebugMode()) {
-            $this->error('DEBUG_VERIFY - Debug mode enabled, logging everything', [
-                'level' => $level,
-                'message' => $message,
-                'debug_mode' => true
-            ]);
-            return true;
-        }
-
-        // If level isn't recognized, log it
-        if (!isset($logLevels[$level])) {
-            $this->error('DEBUG_VERIFY - Unrecognized log level', [
-                'level' => $level,
-                'message' => $message
-            ]);
-            return true;
-        }
-
-        // Log if current level is >= configured level
-        $shouldLog = isset($logLevels[$configLevel]) &&
-            $logLevels[$level] >= $logLevels[$configLevel];
-
-        if ($shouldLog) {
-            $this->error('DEBUG_VERIFY - Log level check passed', [
-                'level' => $level,
-                'config_level' => $configLevel,
-                'message' => $message
-            ]);
-        }
-
-        return $shouldLog;
-    }
-
-    private function log(string $level, string $message, array $context): void
-    {
-        // Direct write for test messages and errors
-        if (
-            str_starts_with($message, 'DEBUG_VERIFY') ||
-            $level === 'ERROR'
-        ) {
-            $this->writeLog($level, $message, $context);
-            return;
-        }
-
-        // For other messages, check if we should log
-        if ($this->shouldLog($level, $message)) {
-            $this->writeLog($level, $message, $context);
-        }
-    }
-
-    private function writeLog(string $level, string $message, array $context): void
-    {
-        try {
-            $this->rotateLogIfNeeded();
-
-            // Filter sensitive data from context
-            $filteredContext = $this->filterLogContext($context);
-
-            $timestamp = date('Y-m-d H:i:s');
-            $pid = getmypid();
-            $contextJson = !empty($filteredContext) ? json_encode($filteredContext, JSON_UNESCAPED_SLASHES) : '';
-
-            $logMessage = sprintf(
-                "[%s] [%s] [PID:%d] %s%s%s",
-                $timestamp,
-                $level,
-                $pid,
-                $message,
-                $contextJson ? " " : "",
-                $contextJson
-            ) . PHP_EOL;
-
-            // Add debug info for test messages
-            if (str_starts_with($message, 'DEBUG_VERIFY')) {
-                $debugInfo = sprintf(
-                    "[DEBUG] Log level: %s, Debug mode: %s, Config level: %s\n",
-                    $level,
-                    Config::getInstance()->isDebugMode() ? 'true' : 'false',
-                    Config::getInstance()->getEnv('LOG_LEVEL', 'unknown')
-                );
-                $logMessage = $debugInfo . $logMessage;
-            }
-
-            if (!file_put_contents($this->logFile, $logMessage, FILE_APPEND | LOCK_EX)) {
-                error_log("Failed to write to log file: {$this->logFile}");
-                // Try to write to PHP error log as fallback
-                error_log($logMessage);
-            }
-        } catch (Exception $e) {
-            error_log("Error writing to log file: " . $e->getMessage());
-            error_log($message);
-        }
-    }
-
     private function rotateLogIfNeeded(): void
     {
-        if (!file_exists($this->logFile)) {
+        if (!file_exists($this->logFile) || filesize($this->logFile) < $this->maxFileSize) {
             return;
         }
 
-        if (filesize($this->logFile) < $this->maxFileSize) {
-            return;
-        }
-
-        // Rotate existing log files
-        for ($i = $this->maxFiles - 1; $i >= 1; $i--) {
+        for ($i = $this->maxFiles - 1; $i > 0; $i--) {
             $oldFile = "{$this->logFile}.{$i}";
             $newFile = "{$this->logFile}." . ($i + 1);
-
             if (file_exists($oldFile)) {
                 rename($oldFile, $newFile);
             }
         }
 
-        // Move current log to .1
         rename($this->logFile, "{$this->logFile}.1");
-
-        // Create new empty log file
         touch($this->logFile);
-        chmod($this->logFile, 0644);
-    }
-
-    public function getLogPath(): string
-    {
-        return $this->logFile;
+        chmod($this->logFile, 0664);
     }
 }

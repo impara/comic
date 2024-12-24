@@ -1,35 +1,43 @@
-# Comic Strip Generator
+# AI Comic Generator
 
-A system for generating comic panels using AI image generation, built with PHP 8.3.
+A web application that generates comic strips from text stories using AI models.
 
 ## Project Structure
 
 ```
-├── api.php              # Main API endpoint
-├── controllers/         # Application controllers
-├── models/             # Data models
-├── utils/              # Utility functions
-├── workers/            # Background job workers
-├── public/             # Public assets
-├── types/              # Type definitions
-├── interfaces/         # Interface definitions
-├── config/             # Configuration files
-└── logs/              # Application logs
+├── api.php             # Main API endpoint
+├── webhook.php         # Webhook handler for AI model callbacks
+├── models/             # Core business logic
+├── services/          # Service layer (Orchestrator, etc.)
+├── public/            # Public assets and generated files
+│   ├── temp/         # Temporary files and job states
+│   └── output/       # Generated comic outputs
+├── config/           # Configuration files
+└── assets/           # Frontend assets
 ```
 
-## Technology Stack
+## Features
 
-- **Backend**: PHP 8.3
-- **Queue System**: Redis
-- **API Integration**: Replicate AI
+- Story-to-comic generation using AI models
+- Character customization and cartoonification
+- Background generation with various styles
+- Real-time progress tracking
+- Webhook integration for AI model callbacks
 
-## Setup & Development
+## Requirements
 
-1. Clone the repository and set up environment:
+- PHP 8.0 or higher
+- Web server (Apache/Nginx)
+- Composer for PHP dependencies
+- Write permissions for `public/temp` and `public/output` directories
+
+## Installation
+
+1. Clone the repository:
 
 ```bash
-cp .env.example .env
-# Edit .env with your settings
+git clone https://github.com/yourusername/comic-generator.git
+cd comic-generator
 ```
 
 2. Install dependencies:
@@ -38,47 +46,61 @@ cp .env.example .env
 composer install
 ```
 
-3. Start the Redis server
-
-4. Start the worker process:
+3. Copy `.env.example` to `.env` and configure your environment:
 
 ```bash
-php workers/process.php
+cp .env.example .env
 ```
+
+4. Ensure write permissions for storage directories:
+
+```bash
+chmod -R 755 public/temp public/output
+```
+
+## Key Features
+
+- Simple file-based job state management
+- Real-time progress tracking through polling
+- Unified webhook handling for all AI model callbacks
+- Clean separation of concerns with Orchestrator pattern
+- Secure file locking for concurrent operations
 
 ## API Endpoints
 
-### Generate Comic Panel
+- `POST /api.php`: Start a new comic generation job
 
-### Check Job Status
+  - Returns: `{"success": true, "jobId": "<id>"}`
 
-```http
-GET /job_status.php?job_ids=job_123,job_456
-```
+- `GET /api.php?action=status&jobId=<id>`: Check job status
+
+  - Returns: `{"status": "processing|completed|failed", "progress": 0-100, "output_url": "..."}`
+
+- `POST /webhook.php`: Receive AI model callbacks
+  - Handles: Cartoonification, background generation, and story segmentation results
 
 ## Configuration
 
-- Environment variables: See `.env.example`
-- Application config: `config/` directory
+Key configuration files:
 
-## Monitoring & Logs
+- `.env`: Environment variables
+- `config/config.php`: Application configuration
 
-- Application logs are stored in `logs/`
-- System logs can be viewed in the logs directory
+## Security
 
-## Error Handling
+- All user uploads are validated and sanitized
+- File permissions are strictly controlled
+- No sensitive data in public directories
+- Secure webhook handling with job ID validation
 
-- Failed jobs are automatically retried
-- Comprehensive error logging
-- Job status tracking through Redis
-- Error notifications via configured channels
+## Contributing
 
-## Development
-
-For detailed technical information and development guidelines, see:
-
-- `TECH_STACK.md` - Technical architecture details
+1. Fork the repository
+2. Create your feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
 
 ## License
 
-This project is proprietary and confidential.
+This project is licensed under the MIT License - see the LICENSE file for details.

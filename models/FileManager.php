@@ -7,38 +7,16 @@ class FileManager
 {
     private LoggerInterface $logger;
     private Config $config;
-    private static ?self $instance = null;
     private const MAX_FILE_AGE = 86400; // 1 day
 
-    /**
-     * Private constructor to enforce singleton pattern
-     * @param LoggerInterface $logger Logger instance
-     */
-    private function __construct(LoggerInterface $logger)
+    public function __construct(LoggerInterface $logger, Config $config)
     {
         $this->logger = $logger;
-        $this->config = Config::getInstance();
-    }
-
-    /**
-     * Get singleton instance
-     * @param LoggerInterface $logger Logger instance
-     * @return self FileManager instance
-     */
-    public static function getInstance(LoggerInterface $logger): self
-    {
-        if (self::$instance === null) {
-            self::$instance = new self($logger);
-        }
-        return self::$instance;
+        $this->config = $config;
     }
 
     /**
      * Save a base64 encoded image to a file
-     * @param string $base64Data Base64 encoded image data
-     * @param string $prefix Prefix for the filename
-     * @return string Path to the saved file
-     * @throws RuntimeException if saving fails
      */
     public function saveBase64Image(string $base64Data, string $prefix = 'img'): string
     {
@@ -51,9 +29,9 @@ class FileManager
                 throw new RuntimeException("Failed to decode base64 image data");
             }
 
-            $outputDir = $this->getOutputPath();
+            $outputDir = $this->config->getOutputPath();
             if (!file_exists($outputDir)) {
-                mkdir($outputDir, 0755, true);
+                mkdir($outputDir, 0775, true);
             }
 
             // Generate a unique filename
@@ -63,6 +41,8 @@ class FileManager
             if (file_put_contents($outputPath, $decodedData) === false) {
                 throw new RuntimeException("Failed to save image to: $outputPath");
             }
+
+            chmod($outputPath, 0664);
 
             $this->logger->debug("Image saved successfully", [
                 'path' => $outputPath,
@@ -81,22 +61,30 @@ class FileManager
 
     /**
      * Save an image from a URL
-     * @param string $url URL of the image
-     * @param string $prefix Prefix for the filename
-     * @return string Path to the saved file
-     * @throws RuntimeException if saving fails
      */
     public function saveImageFromUrl(string $url, string $prefix = 'img'): string
     {
         try {
-            $imageContent = file_get_contents($url);
-            if ($imageContent === false) {
-                throw new RuntimeException("Failed to download image from URL: $url");
+            $ch = curl_init($url);
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+            curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+            $imageContent = curl_exec($ch);
+            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $error = curl_error($ch);
+            curl_close($ch);
+
+            if ($error) {
+                throw new RuntimeException("Failed to download image: $error");
             }
 
-            $outputDir = $this->getOutputPath();
+            if ($httpCode !== 200) {
+                throw new RuntimeException("Failed to download image: HTTP $httpCode");
+            }
+
+            $outputDir = $this->config->getOutputPath();
             if (!file_exists($outputDir)) {
-                mkdir($outputDir, 0755, true);
+                mkdir($outputDir, 0775, true);
             }
 
             // Generate a unique filename
@@ -106,6 +94,8 @@ class FileManager
             if (file_put_contents($outputPath, $imageContent) === false) {
                 throw new RuntimeException("Failed to save image to: $outputPath");
             }
+
+            chmod($outputPath, 0664);
 
             $this->logger->debug("Image saved successfully", [
                 'url' => $url,
@@ -125,35 +115,37 @@ class FileManager
     }
 
     /**
-     * Clean up unused temporary files
-     * @param array $usedFiles Array of files that should be kept
-     * @param int|null $maxAge Maximum age in seconds for files to keep
-     * @return void
+     * Clean up old files in a directory
      */
-    public function cleanupTempFiles(array $usedFiles, ?int $maxAge = null): void
+    public function cleanupDirectory(string $directory, int $maxAge = self::MAX_FILE_AGE, array $excludePatterns = []): void
     {
-        $outputDir = $this->getOutputPath();
-        $maxAge = $maxAge ?? self::MAX_FILE_AGE;
-
-        $this->logger->debug("Starting file cleanup", [
-            'output_dir' => $outputDir,
-            'used_files' => $usedFiles,
-            'max_age' => $maxAge
-        ]);
-
         try {
-            // Get all files in the output directory
-            $files = glob($outputDir . '/*');
+            if (!is_dir($directory)) {
+                throw new RuntimeException("Directory does not exist: $directory");
+            }
+
             $now = time();
+            $files = glob($directory . '/*');
 
             foreach ($files as $file) {
-                // Skip if file is in use
-                if (in_array($file, $usedFiles)) {
-                    $this->logger->debug("Keeping file in use", ['file' => $file]);
+                if (!is_file($file)) {
                     continue;
                 }
 
-                // Remove old files
+                // Check if file matches any exclude pattern
+                $shouldExclude = false;
+                foreach ($excludePatterns as $pattern) {
+                    if (fnmatch($pattern, basename($file))) {
+                        $shouldExclude = true;
+                        break;
+                    }
+                }
+
+                if ($shouldExclude) {
+                    continue;
+                }
+
+                // Remove if older than max age
                 if ($now - filemtime($file) > $maxAge) {
                     if (unlink($file)) {
                         $this->logger->debug("Removed old file", [
@@ -169,46 +161,12 @@ class FileManager
                 }
             }
         } catch (Exception $e) {
-            $this->logger->error("Error during file cleanup", [
+            $this->logger->error("Error during directory cleanup", [
+                'directory' => $directory,
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString()
             ]);
+            throw $e;
         }
-    }
-
-    /**
-     * Get the output directory path
-     * @return string Output directory path
-     */
-    private function getOutputPath(): string
-    {
-        $outputPath = $this->config->get('paths.output');
-
-        // If path is relative, make it absolute using project root
-        if (!str_starts_with($outputPath, '/')) {
-            $outputPath = __DIR__ . '/../' . ltrim($outputPath, '/');
-        }
-
-        if (!file_exists($outputPath)) {
-            if (!mkdir($outputPath, 0775, true)) {
-                throw new RuntimeException("Failed to create output directory: $outputPath");
-            }
-            // Ensure proper permissions
-            if (function_exists('posix_getpwuid')) {
-                chown($outputPath, 'www-data');
-                chgrp($outputPath, 'www-data');
-            }
-        }
-
-        $this->logger->debug("Using output path", [
-            'path' => $outputPath,
-            'exists' => file_exists($outputPath),
-            'writable' => is_writable($outputPath),
-            'owner' => function_exists('posix_getpwuid') ? posix_getpwuid(fileowner($outputPath))['name'] : 'unknown',
-            'group' => function_exists('posix_getgrgid') ? posix_getgrgid(filegroup($outputPath))['name'] : 'unknown',
-            'permissions' => substr(sprintf('%o', fileperms($outputPath)), -4)
-        ]);
-
-        return $outputPath;
     }
 }

@@ -81,7 +81,6 @@ Thumbs.db
 # Cache files
 *.cache
 .php_cs.cache
-redis-data/
 
 # Testing
 /coverage

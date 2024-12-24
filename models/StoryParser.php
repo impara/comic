@@ -1,34 +1,23 @@
 <?php
 
-require_once __DIR__ . '/../interfaces/StoryParserInterface.php';
-require_once __DIR__ . '/Logger.php';
+require_once __DIR__ . '/../interfaces/LoggerInterface.php';
 require_once __DIR__ . '/Config.php';
-require_once __DIR__ . '/ReplicateClient.php';
-require_once __DIR__ . '/CacheManager.php';
 
-class StoryParser implements StoryParserInterface
+class StoryParser
 {
     private LoggerInterface $logger;
     private Config $config;
-    private ReplicateClient $replicateClient;
-    private CacheManager $cacheManager;
     private const PANEL_COUNT = 4;
-    private const CACHE_DURATION = 3600; // 1 hour cache for NLP results
 
     public function __construct(LoggerInterface $logger)
     {
         $this->logger = $logger;
         $this->config = Config::getInstance();
-        $this->replicateClient = new ReplicateClient(
-            $this->config->getApiToken(),
-            $logger
-        );
-
-        // Initialize cache manager
-        $cachePath = $this->config->getTempPath() . '/nlp_cache';
-        $this->cacheManager = new CacheManager($cachePath, $this->logger);
     }
 
+    /**
+     * Segment a story into panels and trigger webhook callback
+     */
     public function segmentStory(string $story, array $options = []): array
     {
         $this->logger->info("Starting story segmentation", [
@@ -39,21 +28,8 @@ class StoryParser implements StoryParserInterface
         ]);
 
         try {
-            // Initial segmentation based on NLP
-            $this->logger->debug("Attempting NLP segmentation", [
-                'story_preview' => substr($story, 0, 100),
-                'options' => $options
-            ]);
-
-            $segments = $this->segmentIntoScenes($story);
-
-            $this->logger->debug("Initial segmentation complete", [
-                'segment_count' => count($segments),
-                'segments' => array_map(fn($s) => [
-                    'length' => strlen($s),
-                    'content' => $s
-                ], $segments)
-            ]);
+            // For now, use simple sentence-based segmentation
+            $segments = $this->simpleSegmentation($story);
 
             // Enforce 4-panel format
             if (count($segments) < self::PANEL_COUNT) {
@@ -73,509 +49,254 @@ class StoryParser implements StoryParserInterface
             // Validate final segments
             $this->validateSegments($segments);
 
+            // Process panel descriptions
+            $processedSegments = $this->processPanelDescriptions($segments, $options);
+
             $this->logger->info("Story segmentation completed", [
-                'final_segment_count' => count($segments),
+                'final_segment_count' => count($processedSegments),
                 'segments' => array_map(fn($s) => [
                     'length' => strlen($s),
                     'content' => $s
-                ], $segments)
+                ], $processedSegments)
             ]);
 
-            return $segments;
+            // Prepare webhook payload
+            $webhookPayload = [
+                'type' => 'llama_complete',
+                'job_id' => $options['job_id'] ?? null,
+                'segments' => $processedSegments,
+                'status' => 'completed'
+            ];
+
+            // If webhook URL is provided, send the callback
+            if (!empty($options['webhook'])) {
+                $this->sendWebhookCallback($options['webhook'], $webhookPayload);
+            }
+
+            return $webhookPayload;
         } catch (Exception $e) {
             $this->logger->error("Story segmentation failed", [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
                 'story_length' => strlen($story)
             ]);
+
+            // Prepare error webhook payload
+            $webhookPayload = [
+                'type' => 'llama_complete',
+                'job_id' => $options['job_id'] ?? null,
+                'status' => 'failed',
+                'error' => $e->getMessage()
+            ];
+
+            // If webhook URL is provided, send the error callback
+            if (!empty($options['webhook'])) {
+                $this->sendWebhookCallback($options['webhook'], $webhookPayload);
+            }
+
             throw $e;
         }
     }
 
     /**
-     * Initial scene segmentation using NLP model with fallback
+     * Send webhook callback
      */
-    private function segmentIntoScenes(string $story): array
+    private function sendWebhookCallback(string $webhookUrl, array $payload): void
     {
         try {
-            // Try NLP-based segmentation first
-            return $this->nlpSegmentation($story);
+            $ch = curl_init($webhookUrl);
+            curl_setopt_array($ch, [
+                CURLOPT_POST => true,
+                CURLOPT_POSTFIELDS => json_encode($payload),
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_HTTPHEADER => [
+                    'Content-Type: application/json',
+                    'User-Agent: ComicGenerator/1.0'
+                ],
+                CURLOPT_TIMEOUT => 10
+            ]);
+
+            $response = curl_exec($ch);
+            $statusCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+
+            if ($statusCode >= 400) {
+                throw new Exception("Webhook request failed with status code: $statusCode");
+            }
+
+            $this->logger->debug("Webhook callback sent", [
+                'url' => $webhookUrl,
+                'status_code' => $statusCode,
+                'response' => $response
+            ]);
         } catch (Exception $e) {
-            $this->logger->warning("NLP segmentation failed, falling back to simple segmentation", [
+            $this->logger->error("Failed to send webhook callback", [
+                'url' => $webhookUrl,
                 'error' => $e->getMessage()
             ]);
-            // Fallback to simple segmentation
-            return $this->simpleSegmentation($story);
         }
     }
 
     /**
-     * NLP-based scene segmentation with caching
-     */
-    private function nlpSegmentation(string $story): array
-    {
-        // Simple cache key based on story hash
-        $cacheKey = 'story_' . md5($story);
-        $cacheFile = $this->config->getTempPath() . '/' . $cacheKey . '.json';
-
-        // Check if we already have the result
-        if (file_exists($cacheFile)) {
-            $data = json_decode(file_get_contents($cacheFile), true);
-            if ($data && isset($data['scenes'])) {
-                $this->logger->debug("Using cached segmentation", [
-                    'cache_key' => $cacheKey
-                ]);
-                return $data['scenes'];
-            }
-        }
-
-        // Get model configuration
-        $modelConfig = $this->config->get('replicate.models.nlp');
-        if (!$modelConfig) {
-            throw new Exception('NLP model configuration not found');
-        }
-
-        // Prepare the prompt
-        $prompt = $this->buildSegmentationPrompt($story);
-
-        // Call NLP model through ReplicateClient
-        $result = $this->replicateClient->predict('nlp', array_merge(
-            $modelConfig['params'],
-            ['prompt' => $prompt]
-        ));
-
-        // Process and validate NLP output
-        $scenes = $this->processNLPOutput($result);
-
-        // Save the result
-        file_put_contents($cacheFile, json_encode([
-            'timestamp' => time(),
-            'scenes' => $scenes
-        ]));
-
-        return $scenes;
-    }
-
-    /**
-     * Build enhanced prompt for NLP segmentation
-     */
-    private function buildSegmentationPrompt(string $story): string
-    {
-        $this->logger->debug("Building segmentation prompt", [
-            'story_length' => strlen($story)
-        ]);
-
-        $prompt = <<<EOT
-Task: Analyze and segment this story into exactly 4 scenes for a comic strip panel sequence.
-
-Requirements:
-1. Each scene must be visually distinct and representable in a single panel
-2. Consider dramatic timing and narrative flow
-3. Ensure proper distribution of action and dialogue
-4. Maintain character continuity across scenes
-5. Create natural transitions between panels
-6. Each scene should be self-contained yet connected to the overall narrative flow
-
-Story:
-$story
-
-Format your response as 4 scenes, each marked with [SCENE] prefix:
-[SCENE] Opening scene description with clear visual elements
-[SCENE] Second scene building on the narrative
-[SCENE] Third scene with rising action or conflict
-[SCENE] Final scene with resolution or punchline
-
-Note: Each scene description should:
-- Focus on visual elements that can be drawn
-- Include character positions and interactions
-- Describe the setting and atmosphere
-- Avoid dialogue-heavy descriptions
-- Be clear and concise
-EOT;
-
-        $this->logger->debug("Built segmentation prompt", [
-            'prompt_length' => strlen($prompt),
-            'prompt_preview' => substr($prompt, 0, 200)
-        ]);
-
-        return $prompt;
-    }
-
-    /**
-     * Process NLP model output into scenes with enhanced validation
-     */
-    private function processNLPOutput($result): array
-    {
-        if (empty($result)) {
-            $this->logger->error("NLP model returned empty result");
-            throw new RuntimeException("NLP model returned empty result");
-        }
-
-        // Get the first element if result is an array
-        $output = is_array($result) ? $result[0] : $result;
-
-        $this->logger->debug("Processing NLP output", [
-            'output_length' => strlen($output),
-            'output_preview' => substr($output, 0, 200)
-        ]);
-
-        // Split output into scenes based on [SCENE] marker
-        $scenes = array_filter(
-            array_map(
-                'trim',
-                preg_split('/\[SCENE\]/', $output, -1, PREG_SPLIT_NO_EMPTY)
-            )
-        );
-
-        if (empty($scenes)) {
-            $this->logger->error("No valid scenes found in NLP output", [
-                'output' => $output
-            ]);
-            throw new RuntimeException("No valid scenes found in NLP output");
-        }
-
-        // Validate scene count
-        if (count($scenes) !== self::PANEL_COUNT) {
-            $this->logger->warning("NLP model returned incorrect number of scenes", [
-                'expected' => self::PANEL_COUNT,
-                'received' => count($scenes),
-                'scenes' => $scenes
-            ]);
-
-            // Attempt to fix scene count
-            if (count($scenes) < self::PANEL_COUNT) {
-                $this->logger->debug("Expanding scenes to match panel count");
-                $scenes = $this->expandScenes($scenes);
-            } else {
-                $this->logger->debug("Consolidating scenes to match panel count");
-                $scenes = $this->consolidateScenes($scenes);
-            }
-        }
-
-        // Validate scene content
-        foreach ($scenes as $index => $scene) {
-            if (strlen($scene) < 20) {
-                $this->logger->error("Scene $index is too short", [
-                    'scene' => $scene,
-                    'length' => strlen($scene)
-                ]);
-                throw new RuntimeException("Scene $index is too short for meaningful visualization");
-            }
-        }
-
-        $this->logger->debug("Processed scenes", [
-            'scene_count' => count($scenes),
-            'scenes' => array_map(fn($s, $i) => [
-                'index' => $i,
-                'length' => strlen($s),
-                'content' => substr($s, 0, 100) . '...'
-            ], $scenes, array_keys($scenes))
-        ]);
-
-        return $scenes;
-    }
-
-    /**
-     * Simple segmentation fallback
+     * Simple segmentation based on sentences and paragraphs
      */
     private function simpleSegmentation(string $story): array
     {
-        // Split on sentence endings followed by spaces
-        $sentences = preg_split('/(?<=[.!?])\s+/', trim($story), -1, PREG_SPLIT_NO_EMPTY);
+        // Split into sentences
+        $sentences = preg_split('/(?<=[.!?])\s+/', trim($story));
+        $sentences = array_filter($sentences); // Remove empty sentences
+        $sentences = array_values($sentences); // Re-index array
 
-        if (empty($sentences)) {
-            throw new RuntimeException("Story must contain at least one complete sentence");
+        $this->logger->debug('Segmenting story', [
+            'sentence_count' => count($sentences),
+            'sentences' => $sentences
+        ]);
+
+        // If we have fewer sentences than needed panels, duplicate some
+        while (count($sentences) < self::PANEL_COUNT) {
+            $sentences[] = end($sentences);
         }
 
-        // Group sentences into logical scenes
-        $scenes = [];
-        $currentScene = [];
-        $sceneLength = 0;
+        // Calculate sentences per segment
+        $sentencesPerSegment = ceil(count($sentences) / self::PANEL_COUNT);
 
-        foreach ($sentences as $sentence) {
-            $currentScene[] = $sentence;
-            $sceneLength += strlen($sentence);
-
-            // Start new scene on significant breaks or length threshold
-            if ($this->isSceneBreak($sentence) || $sceneLength > 200) {
-                $scenes[] = implode(' ', $currentScene);
-                $currentScene = [];
-                $sceneLength = 0;
-            }
-        }
-
-        // Add remaining sentences as last scene
-        if (!empty($currentScene)) {
-            $scenes[] = implode(' ', $currentScene);
-        }
-
-        return $scenes;
-    }
-
-    /**
-     * Expand scenes to fill 4 panels
-     */
-    private function expandScenes(array $scenes): array
-    {
-        if (empty($scenes)) {
-            throw new RuntimeException("No scenes to expand");
-        }
-
-        $expanded = [];
-        $sceneCount = count($scenes);
-
-        // If only one scene, split it into 4
-        if ($sceneCount === 1) {
-            $sentences = preg_split('/(?<=[.!?])\s+/', trim($scenes[0]), -1, PREG_SPLIT_NO_EMPTY);
-            $sentencesPerPanel = max(1, ceil(count($sentences) / self::PANEL_COUNT));
-
-            for ($i = 0; $i < self::PANEL_COUNT; $i++) {
-                $start = $i * $sentencesPerPanel;
-                $slice = array_slice($sentences, $start, $sentencesPerPanel);
-                $expanded[] = !empty($slice) ? implode(' ', $slice) : $scenes[0];
-            }
-        }
-        // Otherwise, distribute scenes evenly
-        else {
-            $distribution = $this->calculatePanelDistribution($sceneCount);
-            $sceneIndex = 0;
-
-            foreach ($distribution as $count) {
-                $slice = array_slice($scenes, $sceneIndex, $count);
-                $expanded[] = implode(' ', $slice);
-                $sceneIndex += $count;
-            }
-        }
-
-        return $expanded;
-    }
-
-    /**
-     * Consolidate scenes to fit in 4 panels
-     */
-    private function consolidateScenes(array $scenes): array
-    {
-        if (count($scenes) <= self::PANEL_COUNT) {
-            return $scenes;
-        }
-
-        $consolidated = [];
-        $scenesPerPanel = ceil(count($scenes) / self::PANEL_COUNT);
-
+        // Group sentences into segments
+        $segments = [];
         for ($i = 0; $i < self::PANEL_COUNT; $i++) {
-            $start = $i * $scenesPerPanel;
-            $slice = array_slice($scenes, $start, $scenesPerPanel);
-            $consolidated[] = implode(' ', $slice);
-        }
+            $start = $i * $sentencesPerSegment;
+            $length = min($sentencesPerSegment, count($sentences) - $start);
 
-        return $consolidated;
-    }
-
-    /**
-     * Calculate how to distribute scenes across panels
-     */
-    private function calculatePanelDistribution(int $sceneCount): array
-    {
-        $distribution = array_fill(0, self::PANEL_COUNT, floor($sceneCount / self::PANEL_COUNT));
-        $remainder = $sceneCount % self::PANEL_COUNT;
-
-        // Distribute remaining scenes
-        for ($i = 0; $i < $remainder; $i++) {
-            $distribution[$i]++;
-        }
-
-        return $distribution;
-    }
-
-    /**
-     * Check if sentence indicates a scene break
-     */
-    private function isSceneBreak(string $sentence): bool
-    {
-        // Scene break indicators
-        $breakPatterns = [
-            '/meanwhile/i',
-            '/later/i',
-            '/suddenly/i',
-            '/after that/i',
-            '/next/i'
-        ];
-
-        foreach ($breakPatterns as $pattern) {
-            if (preg_match($pattern, $sentence)) {
-                return true;
+            if ($length > 0) {
+                $segmentSentences = array_slice($sentences, $start, $length);
+                $segments[] = implode(' ', $segmentSentences);
             }
         }
 
-        return false;
+        // If we still don't have enough segments, duplicate the last one
+        while (count($segments) < self::PANEL_COUNT) {
+            $segments[] = end($segments);
+        }
+
+        // If we have too many segments, merge the last ones
+        if (count($segments) > self::PANEL_COUNT) {
+            $extraSegments = array_slice($segments, self::PANEL_COUNT - 1);
+            $segments = array_slice($segments, 0, self::PANEL_COUNT - 1);
+            $segments[] = implode(' ', $extraSegments);
+        }
+
+        $this->logger->debug('Segmentation result', [
+            'segment_count' => count($segments),
+            'segments' => $segments
+        ]);
+
+        return $segments;
     }
 
     /**
-     * Validate final segmented scenes
+     * Expand scenes to reach target panel count
+     */
+    private function expandScenes(array $segments): array
+    {
+        $this->logger->debug('Expanding scenes', [
+            'initial_count' => count($segments)
+        ]);
+
+        while (count($segments) < self::PANEL_COUNT) {
+            // Find the longest segment to split
+            $maxLength = 0;
+            $maxIndex = 0;
+            foreach ($segments as $i => $segment) {
+                if (strlen($segment) > $maxLength) {
+                    $maxLength = strlen($segment);
+                    $maxIndex = $i;
+                }
+            }
+
+            // Split the longest segment
+            $sentences = preg_split('/(?<=[.!?])\s+/', $segments[$maxIndex]);
+            if (count($sentences) < 2) {
+                // If we can't split further, duplicate the segment
+                $segments[] = $segments[$maxIndex];
+            } else {
+                $midpoint = ceil(count($sentences) / 2);
+                $firstHalf = implode(' ', array_slice($sentences, 0, $midpoint));
+                $secondHalf = implode(' ', array_slice($sentences, $midpoint));
+                array_splice($segments, $maxIndex, 1, [$firstHalf, $secondHalf]);
+            }
+        }
+
+        $this->logger->debug('Scene expansion result', [
+            'final_count' => count($segments),
+            'segments' => $segments
+        ]);
+
+        return $segments;
+    }
+
+    /**
+     * Consolidate scenes to reach target panel count
+     */
+    private function consolidateScenes(array $segments): array
+    {
+        $this->logger->debug('Consolidating scenes', [
+            'initial_count' => count($segments)
+        ]);
+
+        while (count($segments) > self::PANEL_COUNT) {
+            // Find the shortest adjacent segments to merge
+            $minLength = PHP_INT_MAX;
+            $minIndex = 0;
+            for ($i = 0; $i < count($segments) - 1; $i++) {
+                $combinedLength = strlen($segments[$i]) + strlen($segments[$i + 1]);
+                if ($combinedLength < $minLength) {
+                    $minLength = $combinedLength;
+                    $minIndex = $i;
+                }
+            }
+
+            // Merge the segments
+            $merged = $segments[$minIndex] . ' ' . $segments[$minIndex + 1];
+            array_splice($segments, $minIndex, 2, [$merged]);
+        }
+
+        $this->logger->debug('Scene consolidation result', [
+            'final_count' => count($segments),
+            'segments' => $segments
+        ]);
+
+        return $segments;
+    }
+
+    /**
+     * Validate the final segments
      */
     private function validateSegments(array $segments): void
     {
         if (count($segments) !== self::PANEL_COUNT) {
-            throw new RuntimeException("Failed to segment story into exactly " . self::PANEL_COUNT . " panels");
+            throw new Exception("Invalid segment count: " . count($segments));
         }
 
-        foreach ($segments as $index => $segment) {
-            if (empty($segment)) {
-                throw new RuntimeException("Panel {$index} is empty");
-            }
-            if (strlen($segment) < 10) {
-                throw new RuntimeException("Panel {$index} content is too short");
+        foreach ($segments as $segment) {
+            if (empty(trim($segment))) {
+                throw new Exception("Empty segment detected");
             }
         }
     }
 
     /**
-     * Process panel descriptions to ensure they are suitable for generation
-     * @param array $descriptions Array of panel descriptions
-     * @param array $options Processing options
-     * @return array Processed panel descriptions
+     * Process panel descriptions to enhance them for image generation
      */
-    public function processPanelDescriptions(array $descriptions, array $options = []): array
+    public function processPanelDescriptions(array $segments, array $options = []): array
     {
-        $this->logger->info("Processing panel descriptions", [
-            'description_count' => count($descriptions),
-            'options' => $options
-        ]);
+        $style = $options['style'] ?? 'default';
+        $characters = $options['characters'] ?? [];
 
-        $processed = [];
-        foreach ($descriptions as $index => $description) {
-            // Clean and normalize description
-            $cleaned = $this->cleanDescription($description);
+        return array_map(function ($segment) use ($style, $characters) {
+            $characterNames = implode(', ', array_map(fn($c) => $c['name'], $characters));
+            $stylePrefix = $style ? "In $style style: " : '';
+            $characterInfo = $characterNames ? " Characters present: $characterNames. " : '';
 
-            // Enhance description with style-specific terminology
-            $enhanced = $this->enhanceDescription($cleaned, $options['style'] ?? 'default');
-
-            // Validate description length and content
-            $this->validateDescription($enhanced, $index);
-
-            $processed[] = $enhanced;
-        }
-
-        return $processed;
-    }
-
-    /**
-     * Get optimal number of panels based on story content
-     * @param string $story Complete story text
-     * @param array $options Analysis options
-     * @return int Optimal number of panels (defaults to 4)
-     */
-    public function getOptimalPanelCount(string $story, array $options = []): int
-    {
-        $this->logger->info("Calculating optimal panel count", [
-            'story_length' => strlen($story),
-            'options' => $options
-        ]);
-
-        // For now, always return 4 as per requirements
-        return self::PANEL_COUNT;
-    }
-
-    /**
-     * Clean and normalize panel description
-     */
-    private function cleanDescription(string $description): string
-    {
-        // Remove excess whitespace
-        $cleaned = trim(preg_replace('/\s+/', ' ', $description));
-
-        // Ensure proper sentence ending
-        if (!preg_match('/[.!?]$/', $cleaned)) {
-            $cleaned .= '.';
-        }
-
-        return $cleaned;
-    }
-
-    /**
-     * Enhance description with style-specific terminology
-     */
-    private function enhanceDescription(string $description, string $style): string
-    {
-        // Add style-specific enhancements
-        switch ($style) {
-            case 'manga':
-                $description = $this->enhanceMangaStyle($description);
-                break;
-            case 'comic':
-                $description = $this->enhanceComicStyle($description);
-                break;
-            case 'european':
-                $description = $this->enhanceEuropeanStyle($description);
-                break;
-            default:
-                // No specific enhancements for other styles
-                break;
-        }
-
-        return $description;
-    }
-
-    /**
-     * Validate panel description
-     */
-    private function validateDescription(string $description, int $index): void
-    {
-        if (strlen($description) < 10) {
-            throw new RuntimeException("Panel {$index} description is too short");
-        }
-
-        if (strlen($description) > 500) {
-            throw new RuntimeException("Panel {$index} description is too long");
-        }
-
-        if (!preg_match('/[a-zA-Z]/', $description)) {
-            throw new RuntimeException("Panel {$index} description must contain text");
-        }
-    }
-
-    /**
-     * Enhance description for manga style
-     */
-    private function enhanceMangaStyle(string $description): string
-    {
-        // Add manga-specific visual terminology
-        $mangaTerms = [
-            '/\b(move|moving)\b/i' => 'action lines',
-            '/\b(surprise|surprised|shocking)\b/i' => 'dramatic effect',
-            '/\b(emotion|emotional)\b/i' => 'expressive features'
-        ];
-
-        return preg_replace(array_keys($mangaTerms), array_values($mangaTerms), $description);
-    }
-
-    /**
-     * Enhance description for comic style
-     */
-    private function enhanceComicStyle(string $description): string
-    {
-        // Add comic-specific visual terminology
-        $comicTerms = [
-            '/\b(impact|hit|strike)\b/i' => 'pow effect',
-            '/\b(fast|quick|rapid)\b/i' => 'speed lines',
-            '/\b(loud|shouting)\b/i' => 'bold speech'
-        ];
-
-        return preg_replace(array_keys($comicTerms), array_values($comicTerms), $description);
-    }
-
-    /**
-     * Enhance description for European comic style
-     */
-    private function enhanceEuropeanStyle(string $description): string
-    {
-        // Add European comic-specific visual terminology
-        $europeanTerms = [
-            '/\b(scene|setting)\b/i' => 'detailed background',
-            '/\b(mood|atmosphere)\b/i' => 'atmospheric lighting',
-            '/\b(gesture|gesturing)\b/i' => 'expressive pose'
-        ];
-
-        return preg_replace(array_keys($europeanTerms), array_values($europeanTerms), $description);
+            return $stylePrefix . $segment . $characterInfo;
+        }, $segments);
     }
 }

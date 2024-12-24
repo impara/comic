@@ -5,17 +5,20 @@ if (!defined('DEBUG')) {
     define('DEBUG', getenv('APP_DEBUG') === 'true');  // Read from environment
 }
 
+// Define base paths
+$rootDir = dirname(__DIR__);
+$publicDir = $rootDir . '/public';
+
 return [
     'app' => [
         'base_url' => getenv('APP_BASE_URL') ?: 'http://localhost',
         'debug' => DEBUG,
         'log_level' => getenv('APP_LOG_LEVEL') ?: 'info',
-        'log_file' => getenv('APP_LOG_FILE') ?: __DIR__ . '/../logs/app.log',
+        'log_file' => getenv('APP_LOG_FILE') ?: $rootDir . '/logs/app.log',
         'max_concurrent_jobs' => getenv('MAX_CONCURRENT_JOBS') ?: 3,
         'max_retries' => getenv('MAX_RETRIES') ?: 3,
         'retry_delay' => getenv('RETRY_DELAY') ?: 1,
         'job_timeout' => getenv('JOB_TIMEOUT') ?: 300,
-        'worker_timeout' => getenv('WORKER_TIMEOUT') ?: 300,
         'heartbeat_interval' => getenv('HEARTBEAT_INTERVAL') ?: 30
     ],
 
@@ -96,9 +99,12 @@ return [
     ],
 
     'paths' => [
-        'output' => __DIR__ . '/../public/generated',
-        'logs' => __DIR__ . '/../logs',
-        'temp' => __DIR__ . '/../public/temp'
+        'root' => $rootDir,
+        'public' => $publicDir,
+        'output' => $publicDir . '/generated',
+        'logs' => $rootDir . '/logs',
+        'temp' => $publicDir . '/temp',
+        'cache' => $rootDir . '/cache'
     ],
 
     'image' => [
@@ -126,7 +132,6 @@ return [
     ],
 
     'logging' => [
-        'level' => getenv('LOG_LEVEL') ?: 'info',
         'debug_mode' => DEBUG
     ]
 ];
