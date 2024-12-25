@@ -1,9 +1,5 @@
 <?php
 
-require_once __DIR__ . '/../interfaces/LoggerInterface.php';
-require_once __DIR__ . '/Config.php';
-require_once __DIR__ . '/HttpClient.php';
-
 class ReplicateClient
 {
     private string $apiUrl = 'https://api.replicate.com/v1/predictions';
@@ -33,25 +29,28 @@ class ReplicateClient
             'webhook_events' => $input['webhook_events_filter'] ?? []
         ]);
 
+        // Skip webhook in development mode
+        $isDev = $this->config->getEnvironment() === 'development';
+        
         // Prepare API request data
         $requestData = [
             'version' => $input['model'],
-            'input' => $input['input'] ?? [],
-            'webhook' => $input['webhook'] ?? null,
-            'webhook_events_filter' => $input['webhook_events_filter'] ?? ['completed']
+            'input' => $input['input'] ?? []
         ];
 
-        // Add webhook secret if configured
-        if (isset($input['webhook']) && ($webhookSecret = $this->config->get('replicate.webhook_secret'))) {
-            $requestData['webhook_secret'] = $webhookSecret;
+        // Only add webhook in production
+        if (!$isDev && isset($input['webhook'])) {
+            $requestData['webhook'] = str_replace('http://', 'https://', $input['webhook']);
+            $requestData['webhook_events_filter'] = $input['webhook_events_filter'] ?? ['completed'];
         }
 
         $this->logger->debug('Making Replicate API request', [
             'version' => $requestData['version'],
             'webhook_config' => [
                 'url' => $requestData['webhook'] ?? null,
-                'events' => $requestData['webhook_events_filter']
-            ]
+                'events' => $requestData['webhook_events_filter'] ?? []
+            ],
+            'environment' => $this->config->getEnvironment()
         ]);
 
         try {

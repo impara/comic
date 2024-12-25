@@ -1,13 +1,5 @@
 <?php
 
-require_once __DIR__ . '/../interfaces/LoggerInterface.php';
-require_once __DIR__ . '/Config.php';
-require_once __DIR__ . '/CharacterProcessor.php';
-require_once __DIR__ . '/StoryParser.php';
-require_once __DIR__ . '/ImageComposer.php';
-require_once __DIR__ . '/StateManager.php';
-require_once __DIR__ . '/ReplicateClient.php';
-
 class ComicGenerator
 {
     private $stateManager;
@@ -243,6 +235,88 @@ class ComicGenerator
         $pendingFile = $this->config->getTempPath() . "/pending_{$predictionId}.json";
         if (file_put_contents($pendingFile, json_encode($data)) === false) {
             throw new Exception('Failed to create pending file');
+        }
+    }
+
+    /**
+     * Generate a complete comic strip
+     * 
+     * @param string $story The story to generate the comic from
+     * @param array $characters The characters to include in the comic
+     * @param array $options Generation options including style and panel settings
+     * @return array The result of the comic generation
+     */
+    public function generateComicStrip(string $story, array $characters, array $options = []): array
+    {
+        try {
+            // Initialize the comic strip
+            $result = $this->initializeComicStrip($story, $characters, $options);
+            if (!$result['success']) {
+                return $result;
+            }
+
+            $stripId = $result['data']['id'];
+
+            // Process characters first
+            foreach ($characters as $charId => $character) {
+                $characters[$charId] = $this->characterProcessor->processCharacter($character, $stripId);
+            }
+
+            // Get panel descriptions from story
+            $panels = $this->storyParser->segmentStory($story, [
+                'panel_count' => $options['panel_count'] ?? 4
+            ]);
+
+            $panelImages = [];
+            foreach ($panels as $index => $panel) {
+                // Generate background for the panel
+                $panelId = "{$stripId}_panel_{$index}";
+                $this->generatePanelBackground(
+                    $panelId,
+                    $panel['description'],
+                    $options['style']['name'],
+                    $options['style']['background']
+                );
+
+                // Process character interactions for the panel
+                $positions = $this->processCharacterInteractions(
+                    $characters,
+                    $panel['description'],
+                    $options['panel_settings'] ?? []
+                );
+
+                // Prepare panel composition
+                $composition = $this->preparePanelComposition($characters, $positions);
+
+                // Compose the final panel image
+                $panelImages[] = $this->composePanelImage(
+                    $composition,
+                    $panel['description'],
+                    array_merge($options['panel_settings'] ?? [], ['job_id' => $panelId])
+                );
+            }
+
+            // Return the final result
+            return [
+                'success' => true,
+                'data' => [
+                    'id' => $stripId,
+                    'status' => 'completed',
+                    'panels' => $panelImages,
+                    'panel_count' => count($panelImages),
+                    'characters' => $characters
+                ]
+            ];
+        } catch (Exception $e) {
+            $this->logger->error('Comic generation failed', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return [
+                'success' => false,
+                'error' => $e->getMessage()
+            ];
         }
     }
 }

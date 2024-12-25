@@ -1,11 +1,5 @@
 <?php
 
-require_once __DIR__ . '/../interfaces/LoggerInterface.php';
-require_once __DIR__ . '/Config.php';
-require_once __DIR__ . '/ReplicateClient.php';
-require_once __DIR__ . '/ImageComposer.php';
-require_once __DIR__ . '/FileManager.php';
-
 class CharacterProcessor
 {
     private LoggerInterface $logger;

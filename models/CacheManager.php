@@ -1,7 +1,5 @@
 <?php
 
-require_once __DIR__ . '/../interfaces/LoggerInterface.php';
-
 class CacheManager
 {
     private string $cachePath;

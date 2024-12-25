@@ -1,7 +1,5 @@
 <?php
 
-require_once __DIR__ . '/../utils/EnvLoader.php';
-
 class Config
 {
     private static ?Config $instance = null;
@@ -240,7 +238,12 @@ class Config
     public function getEnvironment(): string
     {
         if ($this->environment === null) {
-            $this->environment = strtolower($this->getEnv('APP_ENV', 'production'));
+            $env = strtolower($this->getEnv('APP_ENV', 'production'));
+            // Remove comments and trim whitespace
+            if (strpos($env, '#') !== false) {
+                $env = trim(substr($env, 0, strpos($env, '#')));
+            }
+            $this->environment = trim($env);
         }
         return $this->environment;
     }

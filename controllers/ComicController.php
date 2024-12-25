@@ -1,9 +1,5 @@
 <?php
 
-require_once __DIR__ . '/../models/Logger.php';
-require_once __DIR__ . '/../models/ComicGenerator.php';
-require_once __DIR__ . '/../models/Config.php';
-
 class ComicController
 {
     private $logger;

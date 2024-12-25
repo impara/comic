@@ -1,14 +1,6 @@
 <?php
 
-require_once __DIR__ . '/vendor/autoload.php';
-require_once __DIR__ . '/services/Orchestrator.php';
-require_once __DIR__ . '/models/Config.php';
-require_once __DIR__ . '/models/Logger.php';
-require_once __DIR__ . '/models/ComicGenerator.php';
-require_once __DIR__ . '/models/CharacterProcessor.php';
-require_once __DIR__ . '/models/StoryParser.php';
-require_once __DIR__ . '/models/StateManager.php';
-require_once __DIR__ . '/models/ImageComposer.php';
+require_once __DIR__ . '/bootstrap.php';
 
 // Initialize dependencies
 $logger = new Logger();
@@ -44,30 +36,42 @@ if (!$rawData) {
     exit;
 }
 
-// Verify webhook signature
-$signature = $_SERVER['HTTP_REPLICATE_WEBHOOK_SIGNATURE'] ?? '';
-$secret = $config->get('replicate.webhook_secret');
+// Check if we're in development mode
+$isDev = $config->getEnvironment() === 'development';
+$logger->debug('Webhook environment check', [
+    'is_development' => $isDev,
+    'environment' => $config->getEnvironment()
+]);
 
-if (!$secret) {
-    $logger->error('Webhook secret not configured');
-    http_response_code(500);
-    echo json_encode(['error' => 'Webhook secret not configured']);
-    exit;
-}
+// Verify webhook signature only in non-development environments
+if (!$isDev) {
+    $signature = $_SERVER['HTTP_REPLICATE_WEBHOOK_SIGNATURE'] ?? '';
+    $secret = $config->get('replicate.webhook_secret');
 
-// Calculate expected signature
-$timestamp = $_SERVER['HTTP_REPLICATE_WEBHOOK_TIMESTAMP'] ?? '';
-$computedSignature = hash_hmac('sha256', $timestamp . '.' . $rawData, $secret);
+    if (!$secret) {
+        $logger->error('Webhook secret not configured');
+        http_response_code(500);
+        echo json_encode(['error' => 'Webhook secret not configured']);
+        exit;
+    }
 
-// Verify signature
-if (!hash_equals($signature, $computedSignature)) {
-    $logger->error('Invalid webhook signature', [
-        'received' => $signature,
-        'computed' => $computedSignature
-    ]);
-    http_response_code(401);
-    echo json_encode(['error' => 'Invalid webhook signature']);
-    exit;
+    // Calculate expected signature
+    $timestamp = $_SERVER['HTTP_REPLICATE_WEBHOOK_TIMESTAMP'] ?? '';
+    $computedSignature = hash_hmac('sha256', $timestamp . '.' . $rawData, $secret);
+
+    // Verify signature
+    if (!hash_equals($signature, $computedSignature)) {
+        $logger->error('Invalid webhook signature', [
+            'received' => $signature,
+            'computed' => $computedSignature,
+            'environment' => $config->getEnvironment()
+        ]);
+        http_response_code(401);
+        echo json_encode(['error' => 'Invalid webhook signature']);
+        exit;
+    }
+} else {
+    $logger->info('Skipping webhook signature validation in development mode');
 }
 
 // Parse JSON payload

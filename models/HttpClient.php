@@ -1,7 +1,5 @@
 <?php
 
-require_once __DIR__ . '/../interfaces/LoggerInterface.php';
-
 class HttpClient
 {
     private LoggerInterface $logger;

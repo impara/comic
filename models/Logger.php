@@ -1,8 +1,5 @@
 <?php
 
-require_once __DIR__ . '/../interfaces/LoggerInterface.php';
-require_once __DIR__ . '/Config.php';
-
 class Logger implements LoggerInterface
 {
     private string $logFile;
