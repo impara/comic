@@ -54,33 +54,40 @@ if (!$isDev) {
     // Headers are case-insensitive, convert to lowercase for comparison
     $headers = array_change_key_case($headers, CASE_LOWER);
     
-    $signature = $headers['replicate-webhook-signature'] ?? '';
-    $timestamp = $headers['replicate-webhook-timestamp'] ?? '';
-    $secret = $config->get('replicate.webhook_secret');
+    // Check if this is an internal request
+    $isInternalRequest = ($headers['user-agent'] ?? '') === 'ComicGenerator/1.0';
+    
+    if (!$isInternalRequest) {
+        $signature = $headers['replicate-webhook-signature'] ?? '';
+        $timestamp = $headers['replicate-webhook-timestamp'] ?? '';
+        $secret = $config->get('replicate.webhook_secret');
 
-    if (!$secret) {
-        $logger->error('Webhook secret not configured');
-        http_response_code(500);
-        echo json_encode(['error' => 'Webhook secret not configured']);
-        exit;
-    }
+        if (!$secret) {
+            $logger->error('Webhook secret not configured');
+            http_response_code(500);
+            echo json_encode(['error' => 'Webhook secret not configured']);
+            exit;
+        }
 
-    // Calculate expected signature
-    $computedSignature = hash_hmac('sha256', $timestamp . '.' . $rawData, $secret);
+        // Calculate expected signature
+        $computedSignature = hash_hmac('sha256', $timestamp . '.' . $rawData, $secret);
 
-    // Verify signature
-    if (!hash_equals($signature, $computedSignature)) {
-        $logger->error('Invalid webhook signature', [
-            'received' => $signature,
-            'computed' => $computedSignature,
-            'environment' => $config->getEnvironment(),
-            'timestamp' => $timestamp,
-            'raw_headers' => $headers,
-            'data_length' => strlen($rawData)
-        ]);
-        http_response_code(401);
-        echo json_encode(['error' => 'Invalid webhook signature']);
-        exit;
+        // Verify signature
+        if (!hash_equals($signature, $computedSignature)) {
+            $logger->error('Invalid webhook signature', [
+                'received' => $signature,
+                'computed' => $computedSignature,
+                'environment' => $config->getEnvironment(),
+                'timestamp' => $timestamp,
+                'raw_headers' => $headers,
+                'data_length' => strlen($rawData)
+            ]);
+            http_response_code(401);
+            echo json_encode(['error' => 'Invalid webhook signature']);
+            exit;
+        }
+    } else {
+        $logger->info('Skipping signature validation for internal request');
     }
 } else {
     $logger->info('Skipping webhook signature validation in development mode');
