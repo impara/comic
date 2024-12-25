@@ -45,7 +45,14 @@ $logger->debug('Webhook environment check', [
 
 // Verify webhook signature only in non-development environments
 if (!$isDev) {
-    $signature = $_SERVER['HTTP_REPLICATE_WEBHOOK_SIGNATURE'] ?? '';
+    // Get all headers
+    $headers = getallheaders();
+    $logger->debug('Webhook headers received', [
+        'headers' => $headers
+    ]);
+
+    $signature = $headers['Replicate-Webhook-Signature'] ?? '';
+    $timestamp = $headers['Replicate-Webhook-Timestamp'] ?? '';
     $secret = $config->get('replicate.webhook_secret');
 
     if (!$secret) {
@@ -56,7 +63,6 @@ if (!$isDev) {
     }
 
     // Calculate expected signature
-    $timestamp = $_SERVER['HTTP_REPLICATE_WEBHOOK_TIMESTAMP'] ?? '';
     $computedSignature = hash_hmac('sha256', $timestamp . '.' . $rawData, $secret);
 
     // Verify signature
@@ -64,7 +70,9 @@ if (!$isDev) {
         $logger->error('Invalid webhook signature', [
             'received' => $signature,
             'computed' => $computedSignature,
-            'environment' => $config->getEnvironment()
+            'environment' => $config->getEnvironment(),
+            'timestamp' => $timestamp,
+            'headers' => array_keys($headers)
         ]);
         http_response_code(401);
         echo json_encode(['error' => 'Invalid webhook signature']);
