@@ -36,7 +36,7 @@ return [
                     'guidance_scale' => 7.5,
                     'width' => 1024,
                     'height' => 1024,
-                    'scheduler' => "DPM++ 2M Karras",
+                    'scheduler' => "DPMSolverMultistep",
                     'refine' => "expert_ensemble_refiner",
                     'high_noise_frac' => 0.8,
                     'refine_steps' => 25,
