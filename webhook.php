@@ -51,8 +51,11 @@ if (!$isDev) {
         'headers' => $headers
     ]);
 
-    $signature = $headers['Replicate-Webhook-Signature'] ?? '';
-    $timestamp = $headers['Replicate-Webhook-Timestamp'] ?? '';
+    // Headers are case-insensitive, convert to lowercase for comparison
+    $headers = array_change_key_case($headers, CASE_LOWER);
+    
+    $signature = $headers['replicate-webhook-signature'] ?? '';
+    $timestamp = $headers['replicate-webhook-timestamp'] ?? '';
     $secret = $config->get('replicate.webhook_secret');
 
     if (!$secret) {
@@ -72,7 +75,8 @@ if (!$isDev) {
             'computed' => $computedSignature,
             'environment' => $config->getEnvironment(),
             'timestamp' => $timestamp,
-            'headers' => array_keys($headers)
+            'raw_headers' => $headers,
+            'data_length' => strlen($rawData)
         ]);
         http_response_code(401);
         echo json_encode(['error' => 'Invalid webhook signature']);
