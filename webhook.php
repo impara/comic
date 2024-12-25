@@ -58,8 +58,8 @@ if (!$isDev) {
     $isInternalRequest = ($headers['user-agent'] ?? '') === 'ComicGenerator/1.0';
     
     if (!$isInternalRequest) {
-        $signature = $headers['replicate-webhook-signature'] ?? '';
-        $timestamp = $headers['replicate-webhook-timestamp'] ?? '';
+        $signature = $headers['webhook-signature'] ?? '';
+        $timestamp = $headers['webhook-timestamp'] ?? '';
         $secret = $config->get('replicate.webhook_secret');
 
         if (!$secret) {
@@ -69,8 +69,16 @@ if (!$isDev) {
             exit;
         }
 
+        // Extract the signature value from the v1,<signature> format
+        if (preg_match('/^v1,(.+)$/', $signature, $matches)) {
+            $signature = $matches[1];
+        }
+
         // Calculate expected signature
         $computedSignature = hash_hmac('sha256', $timestamp . '.' . $rawData, $secret);
+
+        // Convert computed signature to base64 to match Replicate's format
+        $computedSignature = base64_encode(hex2bin($computedSignature));
 
         // Verify signature
         if (!hash_equals($signature, $computedSignature)) {
