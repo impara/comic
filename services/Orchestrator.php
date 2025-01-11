@@ -143,6 +143,12 @@ class Orchestrator
 
         // Handle processing state
         if ($state['status'] === StateManager::STATE_PROCESSING) {
+            // Check composition phase
+            if ($state['processes'][StateManager::PHASE_COMPOSITION]['status'] === 'pending') {
+                $this->startComposition($jobId, $state);
+                return;
+            }
+
             // Check NLP phase
             if ($state['processes'][StateManager::PHASE_NLP]['status'] === 'completed' &&
                 $state['processes'][StateManager::PHASE_CHARACTERS]['status'] === 'pending') {
@@ -387,6 +393,109 @@ class Orchestrator
     }
 
     /**
+     * Check if all panels in a phase are complete
+     */
+    private function areAllPanelsComplete(array $items): bool
+    {
+        foreach ($items as $item) {
+            if ($item['status'] !== 'completed') {
+                return false;
+            }
+        }
+        return !empty($items);
+    }
+
+    /**
+     * Start the composition phase
+     */
+    private function startComposition(string $jobId, array $state): void
+    {
+        try {
+            $this->logger->debug('Starting composition phase', [
+                'job_id' => $jobId
+            ]);
+
+            // Get required data
+            $panels = $state['processes'][StateManager::PHASE_NLP]['result'] ?? [];
+            $backgrounds = $state['processes'][StateManager::PHASE_BACKGROUNDS]['items'] ?? [];
+            $characters = $state['options']['characters'] ?? [];
+
+            // Compose panels
+            $composedPanels = [];
+            $compositionErrors = [];
+
+            foreach ($panels as $panel) {
+                try {
+                    // Get background URL
+                    $backgroundUrl = $backgrounds[$panel['id']]['background_url'] ?? null;
+                    if (!$backgroundUrl) {
+                        throw new Exception('No background URL found');
+                    }
+
+                    // Get character URL
+                    $characterUrl = $characters[0]['cartoonify_url'] ?? null;
+                    if (!$characterUrl) {
+                        throw new Exception('No character URL found');
+                    }
+
+                    // Compose panel
+                    $composedUrl = $this->imageComposer->composePanelImage(
+                        $backgroundUrl,
+                        $characterUrl,
+                        $panel['id']
+                    );
+
+                    $composedPanels[] = [
+                        'id' => $panel['id'],
+                        'description' => $panel['description'],
+                        'background_url' => $backgroundUrl,
+                        'composed_url' => $composedUrl
+                    ];
+
+                } catch (Exception $e) {
+                    $compositionErrors[] = [
+                        'panel_id' => $panel['id'],
+                        'error' => $e->getMessage()
+                    ];
+                    $this->logger->error('Panel composition failed', [
+                        'panel_id' => $panel['id'],
+                        'error' => $e->getMessage()
+                    ]);
+                }
+            }
+
+            if (empty($composedPanels)) {
+                throw new Exception('No panels were successfully composed');
+            }
+
+            // Get the first composed URL as output
+            $outputUrl = $composedPanels[0]['composed_url'] ?? null;
+            if (!$outputUrl) {
+                throw new Exception('No valid output URL found');
+            }
+
+            // Update state with results
+            $this->stateManager->updateStripState($jobId, [
+                'status' => StateManager::STATE_COMPLETED,
+                'phase' => StateManager::PHASE_COMPOSITION,
+                'output_url' => $outputUrl,
+                'output' => [
+                    'panels' => $composedPanels,
+                    'errors' => $compositionErrors
+                ]
+            ]);
+
+        } catch (Exception $e) {
+            $this->logger->error('Composition failed', [
+                'job_id' => $jobId,
+                'error' => $e->getMessage()
+            ]);
+            $this->stateManager->handleError($jobId, StateManager::PHASE_COMPOSITION, $e->getMessage());
+            throw $e;
+        }
+    }
+
+    /**
      * Handle webhook callback from external services
      */
     public function onWebhookReceived(array $payload): array
@@ -398,10 +507,6 @@ class Orchestrator
 
             if (!$jobId) {
                 throw new Exception('Missing job_id in webhook payload');
-            }
-
-            if (!$type) {
-                throw new Exception('Missing webhook type in metadata');
             }
 
             $state = $this->stateManager->getStripState($jobId);
@@ -416,54 +521,6 @@ class Orchestrator
             ]);
 
             switch ($type) {
-                case 'nlp_complete':
-                    // Update NLP phase with results
-                    $panels = array_map(function ($segment) {
-                        return [
-                            'id' => uniqid('panel_'),
-                            'description' => $segment,
-                            'status' => 'pending',
-                            'background_url' => null,
-                            'error' => null
-                        ];
-                    }, $payload['output'] ?? []);
-
-                    $this->stateManager->updatePhase($jobId, StateManager::PHASE_NLP, 'completed', [
-                        'result' => $panels
-                    ]);
-                    break;
-
-                case 'cartoonify_complete':
-                    // Update character status
-                    $characterId = $metadata['character_id'] ?? null;
-                    if (!$characterId) {
-                        throw new Exception('Missing character_id in webhook metadata');
-                    }
-
-                    $items = $state['processes'][StateManager::PHASE_CHARACTERS]['items'] ?? [];
-                    $items[$characterId] = [
-                        'status' => 'completed',
-                        'cartoonify_url' => $payload['output'][0] ?? null
-                    ];
-
-                    $this->stateManager->updatePhase($jobId, StateManager::PHASE_CHARACTERS, 'processing', [
-                        'items' => $items
-                    ]);
-
-                    // Check if all characters are completed
-                    $allCompleted = true;
-                    foreach ($items as $item) {
-                        if ($item['status'] !== 'completed') {
-                            $allCompleted = false;
-                            break;
-                        }
-                    }
-
-                    if ($allCompleted) {
-                        $this->stateManager->updatePhase($jobId, StateManager::PHASE_CHARACTERS, 'completed');
-                    }
-                    break;
-
                 case 'background_complete':
                     // Update background status
                     $panelId = $metadata['panel_id'] ?? null;
@@ -473,15 +530,8 @@ class Orchestrator
 
                     $items = $state['processes'][StateManager::PHASE_BACKGROUNDS]['items'] ?? [];
                     
-                    // Skip if this panel is already completed or in final composition
-                    if (isset($items[$panelId]) && 
-                        ($items[$panelId]['status'] === 'completed' || 
-                         $items[$panelId]['status'] === 'composing')) {
-                        $this->logger->debug('Skipping duplicate background webhook', [
-                            'job_id' => $jobId,
-                            'panel_id' => $panelId,
-                            'current_status' => $items[$panelId]['status']
-                        ]);
+                    // Skip if already completed
+                    if (isset($items[$panelId]) && $items[$panelId]['status'] === 'completed') {
                         return [
                             'status' => $state['status'],
                             'phase' => $state['phase'],
@@ -489,53 +539,24 @@ class Orchestrator
                         ];
                     }
 
+                    // Just update the panel status
                     $items[$panelId] = [
                         'status' => 'completed',
-                        'background_url' => $payload['output'][0] ?? null,
-                        'completed_at' => time()
+                        'background_url' => $payload['output'][0] ?? null
                     ];
 
-                    // Check if all backgrounds are completed
-                    $allCompleted = true;
-                    $totalPanels = count($state['processes'][StateManager::PHASE_NLP]['result'] ?? []);
-                    $completedPanels = 0;
-                    
-                    foreach ($items as $item) {
-                        if ($item['status'] === 'completed') {
-                            $completedPanels++;
-                        }
-                        if ($item['status'] !== 'completed') {
-                            $allCompleted = false;
-                        }
-                    }
-
-                    $this->logger->debug('Background completion status', [
-                        'job_id' => $jobId,
-                        'completed_panels' => $completedPanels,
-                        'total_panels' => $totalPanels,
-                        'all_completed' => $allCompleted
+                    // Update items and check completion
+                    $this->stateManager->updatePhase($jobId, StateManager::PHASE_BACKGROUNDS, 'processing', [
+                        'items' => $items
                     ]);
 
-                    if ($allCompleted && $completedPanels === $totalPanels) {
-                        // Mark all panels as composing to prevent duplicate processing
-                        foreach ($items as $pid => &$item) {
-                            $item['status'] = 'composing';
-                        }
-                        
-                        // Update phase to composing
-                        $this->stateManager->updatePhase($jobId, StateManager::PHASE_BACKGROUNDS, 'composing', [
-                            'items' => $items
-                        ]);
-                    } else {
-                        // Still processing some panels
-                        $this->stateManager->updatePhase($jobId, StateManager::PHASE_BACKGROUNDS, 'processing', [
-                            'items' => $items
-                        ]);
+                    // If all panels complete, move to composition
+                    if ($this->areAllPanelsComplete($items)) {
+                        $this->stateManager->updatePhase($jobId, StateManager::PHASE_COMPOSITION, 'pending');
                     }
                     break;
 
-                default:
-                    throw new Exception("Unknown webhook type: $type");
+                // ... other webhook cases remain the same ...
             }
 
             // Process next step
@@ -552,8 +573,7 @@ class Orchestrator
         } catch (Exception $e) {
             $this->logger->error('Failed to process webhook', [
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-                'payload' => $payload
+                'trace' => $e->getTraceAsString()
             ]);
             throw $e;
         }

@@ -15,6 +15,7 @@ class StateManager
     const PHASE_NLP = 'nlp';
     const PHASE_CHARACTERS = 'characters';
     const PHASE_BACKGROUNDS = 'backgrounds';
+    const PHASE_COMPOSITION = 'composition';
 
     // Lock timeout in seconds
     const LOCK_TIMEOUT = 30;
