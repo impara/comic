@@ -1,0 +1,92 @@
+# PHP
+vendor/
+composer.phar
+*.log
+.phpunit.result.cache
+
+# Environment files
+.env
+.env.backup
+.env.*.local
+.env.production
+.env.development
+.env.test
+
+# Credentials and Secrets
+*.pem
+*.key
+*.crt
+*.csr
+*.cert
+*credentials*
+*secret*
+*password*
+*token*
+auth.json
+.htpasswd
+
+# Docker
+.docker/
+docker-compose.override.yml
+docker-compose.yml
+Dockerfile
+.dockerignore
+
+# Kubernetes / K3s
+k3s/
+*.kubeconfig
+.kube/
+*.yaml
+*.yml
+!.env.example
+
+# IDE and Editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+php_errors.log
+error_log
+debug.log
+
+# Generated files
+generated/
+dist/
+build/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Application specific
+/public/hot
+/public/storage
+/storage/*.key
+
+# Dependencies
+/node_modules
+/bower_components
+
+# Cache files
+*.cache
+.php_cs.cache
+
+# Testing
+/coverage
+.phpunit.cache
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
