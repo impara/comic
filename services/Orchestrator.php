@@ -160,101 +160,124 @@ class Orchestrator
             // Check if all phases are complete
             if ($state['processes'][StateManager::PHASE_NLP]['status'] === 'completed' &&
                 $state['processes'][StateManager::PHASE_CHARACTERS]['status'] === 'completed' &&
-                $state['processes'][StateManager::PHASE_BACKGROUNDS]['status'] === 'completed') {
+                $state['processes'][StateManager::PHASE_BACKGROUNDS]['status'] === 'composing') {
                 
-                $this->logger->debug('All phases completed, starting final composition', [
+                $this->logger->debug('Starting final composition', [
                     'job_id' => $jobId
                 ]);
                 
-                // Collect all panel URLs before completing
-                $panels = $state['processes'][StateManager::PHASE_NLP]['result'] ?? [];
-                $backgrounds = $state['processes'][StateManager::PHASE_BACKGROUNDS]['items'] ?? [];
-                $characters = $state['options']['characters'] ?? [];
-                
-                // Compose final panels
-                $composedPanels = [];
-                foreach ($panels as &$panel) {
-                    if (isset($backgrounds[$panel['id']])) {
-                        // Get background URL
-                        $backgroundUrl = $backgrounds[$panel['id']]['background_url'];
-                        
-                        // For now, just use the first character's URL
-                        // TODO: Support multiple characters per panel
-                        $characterUrl = $characters[0]['cartoonify_url'] ?? null;
-                        if (!$characterUrl) {
-                            $this->logger->error('No character URL found for panel', [
-                                'panel_id' => $panel['id']
-                            ]);
-                            continue;
-                        }
-                        
-                        try {
-                            // Compose panel with background and character
-                            $composedUrl = $this->imageComposer->composePanelImage(
-                                $backgroundUrl,
-                                $characterUrl,
-                                $panel['id']
-                            );
-                            
-                            // Update panel with composed URL and status
-                            $panel['background_url'] = $backgroundUrl;
-                            $panel['composed_url'] = $composedUrl;
-                            $panel['status'] = 'completed';
-                            
-                            $composedPanels[] = [
-                                'id' => $panel['id'],
-                                'description' => $panel['description'],
-                                'background_url' => $backgroundUrl,
-                                'composed_url' => $composedUrl
-                            ];
-                            
-                            $this->logger->debug('Panel composition completed', [
-                                'panel_id' => $panel['id'],
-                                'composed_url' => $composedUrl
-                            ]);
-                        } catch (Exception $e) {
-                            $this->logger->error('Panel composition failed', [
-                                'panel_id' => $panel['id'],
-                                'error' => $e->getMessage()
-                            ]);
-                            continue;
+                try {
+                    // Collect all panel URLs before completing
+                    $panels = $state['processes'][StateManager::PHASE_NLP]['result'] ?? [];
+                    $backgrounds = $state['processes'][StateManager::PHASE_BACKGROUNDS]['items'] ?? [];
+                    $characters = $state['options']['characters'] ?? [];
+                    
+                    // Compose final panels
+                    $composedPanels = [];
+                    $compositionErrors = [];
+                    
+                    foreach ($panels as &$panel) {
+                        if (isset($backgrounds[$panel['id']])) {
+                            try {
+                                // Get background URL
+                                $backgroundUrl = $backgrounds[$panel['id']]['background_url'];
+                                if (!$backgroundUrl) {
+                                    throw new Exception('No background URL found');
+                                }
+                                
+                                // For now, just use the first character's URL
+                                // TODO: Support multiple characters per panel
+                                $characterUrl = $characters[0]['cartoonify_url'] ?? null;
+                                if (!$characterUrl) {
+                                    throw new Exception('No character URL found');
+                                }
+                                
+                                // Compose panel with background and character
+                                $composedUrl = $this->imageComposer->composePanelImage(
+                                    $backgroundUrl,
+                                    $characterUrl,
+                                    $panel['id']
+                                );
+                                
+                                // Update panel with composed URL and status
+                                $panel['background_url'] = $backgroundUrl;
+                                $panel['composed_url'] = $composedUrl;
+                                $panel['status'] = 'completed';
+                                
+                                $composedPanels[] = [
+                                    'id' => $panel['id'],
+                                    'description' => $panel['description'],
+                                    'background_url' => $backgroundUrl,
+                                    'composed_url' => $composedUrl
+                                ];
+                                
+                                $this->logger->debug('Panel composition completed', [
+                                    'panel_id' => $panel['id'],
+                                    'composed_url' => $composedUrl
+                                ]);
+                            } catch (Exception $e) {
+                                $compositionErrors[] = [
+                                    'panel_id' => $panel['id'],
+                                    'error' => $e->getMessage()
+                                ];
+                                $this->logger->error('Panel composition failed', [
+                                    'panel_id' => $panel['id'],
+                                    'error' => $e->getMessage()
+                                ]);
+                                continue;
+                            }
                         }
                     }
+                    
+                    if (empty($composedPanels)) {
+                        throw new Exception('No panels were successfully composed: ' . 
+                            json_encode($compositionErrors));
+                    }
+                    
+                    // First update the backgrounds phase with composed panels
+                    $this->stateManager->updatePhase($jobId, StateManager::PHASE_BACKGROUNDS, 'completed', [
+                        'result' => $panels,
+                        'composed_panels' => $composedPanels,
+                        'composition_errors' => $compositionErrors
+                    ]);
+                    
+                    // Get the first successfully composed URL
+                    $outputUrl = $composedPanels[0]['composed_url'] ?? null;
+                    if (!$outputUrl) {
+                        throw new Exception('No valid output URL found after composition');
+                    }
+                    
+                    $this->logger->debug('Transitioning to completed state', [
+                        'job_id' => $jobId,
+                        'output_url' => $outputUrl,
+                        'total_panels' => count($composedPanels),
+                        'error_count' => count($compositionErrors)
+                    ]);
+                    
+                    // Then transition to completed state with output URL
+                    $this->stateManager->transitionTo($jobId, StateManager::STATE_COMPLETED);
+                    
+                    // Finally update with output URL and panels
+                    $this->stateManager->updateStripState($jobId, [
+                        'phase' => StateManager::PHASE_BACKGROUNDS,
+                        'output_url' => $outputUrl,
+                        'output' => [
+                            'panels' => $composedPanels,
+                            'characters' => $characters,
+                            'errors' => $compositionErrors
+                        ]
+                    ]);
+                    
+                } catch (Exception $e) {
+                    $this->logger->error('Final composition failed', [
+                        'job_id' => $jobId,
+                        'error' => $e->getMessage()
+                    ]);
+                    
+                    // Update state to error
+                    $this->stateManager->handleError($jobId, StateManager::PHASE_BACKGROUNDS, $e->getMessage());
+                    throw $e;
                 }
-                
-                if (empty($composedPanels)) {
-                    throw new Exception('No panels were successfully composed');
-                }
-                
-                // First update the backgrounds phase with composed panels
-                $this->stateManager->updatePhase($jobId, StateManager::PHASE_BACKGROUNDS, 'completed', [
-                    'result' => $panels,
-                    'composed_panels' => $composedPanels
-                ]);
-                
-                // Get the first successfully composed URL
-                $outputUrl = $composedPanels[0]['composed_url'] ?? null;
-                if (!$outputUrl) {
-                    throw new Exception('No valid output URL found after composition');
-                }
-                
-                $this->logger->debug('Transitioning to completed state', [
-                    'job_id' => $jobId,
-                    'output_url' => $outputUrl
-                ]);
-                
-                // Then transition to completed state with output URL
-                $this->stateManager->transitionTo($jobId, StateManager::STATE_COMPLETED);
-                
-                // Finally update with output URL and panels
-                $this->stateManager->updateStripState($jobId, [
-                    'phase' => StateManager::PHASE_BACKGROUNDS,
-                    'output_url' => $outputUrl,
-                    'output' => [
-                        'panels' => $composedPanels,
-                        'characters' => $characters
-                    ]
-                ]);
                 
                 return;
             }
@@ -450,18 +473,26 @@ class Orchestrator
 
                     $items = $state['processes'][StateManager::PHASE_BACKGROUNDS]['items'] ?? [];
                     
-                    // Skip if this panel is already completed
-                    if (isset($items[$panelId]) && $items[$panelId]['status'] === 'completed') {
+                    // Skip if this panel is already completed or in final composition
+                    if (isset($items[$panelId]) && 
+                        ($items[$panelId]['status'] === 'completed' || 
+                         $items[$panelId]['status'] === 'composing')) {
                         $this->logger->debug('Skipping duplicate background webhook', [
                             'job_id' => $jobId,
-                            'panel_id' => $panelId
+                            'panel_id' => $panelId,
+                            'current_status' => $items[$panelId]['status']
                         ]);
-                        break;
+                        return [
+                            'status' => $state['status'],
+                            'phase' => $state['phase'],
+                            'progress' => $state['progress']
+                        ];
                     }
 
                     $items[$panelId] = [
                         'status' => 'completed',
-                        'background_url' => $payload['output'][0] ?? null
+                        'background_url' => $payload['output'][0] ?? null,
+                        'completed_at' => time()
                     ];
 
                     // Check if all backgrounds are completed
@@ -486,8 +517,13 @@ class Orchestrator
                     ]);
 
                     if ($allCompleted && $completedPanels === $totalPanels) {
-                        // All panels are complete, update phase to completed
-                        $this->stateManager->updatePhase($jobId, StateManager::PHASE_BACKGROUNDS, 'completed', [
+                        // Mark all panels as composing to prevent duplicate processing
+                        foreach ($items as $pid => &$item) {
+                            $item['status'] = 'composing';
+                        }
+                        
+                        // Update phase to composing
+                        $this->stateManager->updatePhase($jobId, StateManager::PHASE_BACKGROUNDS, 'composing', [
                             'items' => $items
                         ]);
                     } else {
