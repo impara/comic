@@ -207,8 +207,187 @@ export const ComicGenerator = {
 
     handleCompletion(state) {
         this.stopPolling();
-        if (this.uiManager) {
-            this.uiManager.showCompletion(state.output_url);
+
+        if (!state || !state.output) {
+            console.error('Invalid completion state:', state);
+            if (this.uiManager) {
+                this.uiManager.showError('Comic generation completed but no output was received');
+            }
+            return;
         }
+
+        // Get the panels container
+        const panelContainer = document.getElementById('comic-panels');
+        if (!panelContainer) {
+            console.error('Comic panels container not found');
+            return;
+        }
+
+        // Clear any existing panels
+        panelContainer.innerHTML = '';
+
+        if (state.output.panels && Array.isArray(state.output.panels)) {
+            // Create and append each panel
+            state.output.panels.forEach((panel, index) => {
+                if (!panel.composed_url) {
+                    console.error(`Panel ${index} missing composed URL:`, panel);
+                    return;
+                }
+
+                // Create panel wrapper
+                const panelElement = document.createElement('div');
+                panelElement.className = 'comic-panel';
+
+                // Create image with loading state
+                const img = document.createElement('img');
+                img.src = panel.composed_url;
+                img.alt = panel.description || `Panel ${index + 1}`;
+                img.className = 'comic-image';
+                img.loading = 'lazy'; // Enable lazy loading
+
+                // Add loading indicator
+                img.style.opacity = '0';
+                img.onload = () => {
+                    img.style.transition = 'opacity 0.3s ease-in';
+                    img.style.opacity = '1';
+                };
+
+                // Add error handling
+                img.onerror = () => {
+                    console.error(`Failed to load panel image: ${panel.composed_url}`);
+                    img.src = '/assets/images/error-placeholder.png';
+                    img.alt = 'Failed to load panel';
+                };
+
+                // Add description if available
+                if (panel.description) {
+                    const desc = document.createElement('p');
+                    desc.className = 'panel-description';
+                    desc.textContent = panel.description;
+                    panelElement.appendChild(desc);
+                }
+
+                // Append image
+                panelElement.appendChild(img);
+                panelContainer.appendChild(panelElement);
+            });
+
+            // Show completion message
+            if (this.uiManager) {
+                this.uiManager.showCompletion({
+                    totalPanels: state.output.panels.length,
+                    outputUrl: state.output_url,
+                    errors: state.output.errors || []
+                });
+            }
+        } else {
+            // Fallback to single output URL if no panels array
+            if (state.output_url) {
+                const img = document.createElement('img');
+                img.src = state.output_url;
+                img.alt = 'Generated comic strip';
+                img.className = 'comic-image';
+                panelContainer.appendChild(img);
+
+                if (this.uiManager) {
+                    this.uiManager.showCompletion({
+                        totalPanels: 1,
+                        outputUrl: state.output_url,
+                        errors: []
+                    });
+                }
+            } else {
+                console.error('No panels or output URL found in completion state:', state);
+                if (this.uiManager) {
+                    this.uiManager.showError('Comic generation completed but no images were produced');
+                }
+            }
+        }
+
+        // Log completion
+        console.log('Comic generation completed:', {
+            totalPanels: state.output.panels?.length || 0,
+            outputUrl: state.output_url,
+            errors: state.output.errors || []
+        });
     }
-}; 
+};
+
+function checkJobStatus(jobId) {
+    return fetch(`/api/jobs/${jobId}/status`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'completed') {
+                // Verify output exists
+                if (!data.output || !data.output.panels) {
+                    throw new Error('Job completed but no output panels found');
+                }
+
+                // Display each composed panel
+                const panelContainer = document.getElementById('comic-panels');
+                panelContainer.innerHTML = ''; // Clear previous content
+
+                data.output.panels.forEach(panel => {
+                    if (!panel.composed_url) {
+                        console.error('Missing composed URL for panel:', panel.id);
+                        return;
+                    }
+
+                    // Create panel element
+                    const panelElement = document.createElement('div');
+                    panelElement.className = 'comic-panel';
+
+                    // Create image element
+                    const img = document.createElement('img');
+                    img.src = panel.composed_url;
+                    img.alt = `Comic panel: ${panel.description}`;
+                    img.className = 'comic-image';
+
+                    // Create description element
+                    const desc = document.createElement('p');
+                    desc.className = 'panel-description';
+                    desc.textContent = panel.description;
+
+                    // Append elements
+                    panelElement.appendChild(img);
+                    panelElement.appendChild(desc);
+                    panelContainer.appendChild(panelElement);
+                });
+
+                // Show completion message
+                showCompletionMessage();
+                return true;
+            }
+            return false;
+        })
+        .catch(error => {
+            console.error('Error checking job status:', error);
+            showError(error.message);
+            throw error;
+        });
+}
+
+function showCompletionMessage() {
+    const statusElement = document.getElementById('status-message');
+    statusElement.textContent = 'Comic generation complete!';
+    statusElement.className = 'status-message success';
+}
+
+function showError(message) {
+    const statusElement = document.getElementById('status-message');
+    statusElement.textContent = `Error: ${message}`;
+    statusElement.className = 'status-message error';
+}
+
+// Example usage with polling
+function pollJobStatus(jobId) {
+    const interval = setInterval(() => {
+        checkJobStatus(jobId)
+            .then(completed => {
+                if (completed) {
+                    clearInterval(interval);
+                }
+            })
+            .catch(() => clearInterval(interval));
+    }, 5000); // Poll every 5 seconds
+} 

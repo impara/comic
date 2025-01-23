@@ -16,102 +16,82 @@ class ImageComposer
     /**
      * Compose a comic panel with intelligent character placement
      */
-    public function composePanelImage(array $composition, string $description, array $options = []): string
+    public function composePanelImage(string $backgroundUrl, array $characterMap, string $panelId): string
     {
-        $jobId = $options['job_id'] ?? null;
         $this->logger->info("Starting panel composition", [
-            'character_count' => count($composition),
-            'description' => $description,
-            'job_id' => $jobId
+            'panel_id' => $panelId,
+            'character_count' => count($characterMap)
         ]);
 
         try {
-            // Validate all images
-            foreach ($composition as $charId => $data) {
-                if (!isset($data['image']) || !filter_var($data['image'], FILTER_VALIDATE_URL)) {
-                    throw new Exception("Invalid image URL for character $charId");
-                }
+            // Load background image
+            $background = $this->loadImageFromUrl($backgroundUrl);
+            if (!$background) {
+                throw new Exception("Failed to load background image: $backgroundUrl");
             }
 
-            // Create a new image with transparent background
-            $width = $options['width'] ?? 1024;
-            $height = $options['height'] ?? 1024;
-            $panel = imagecreatetruecolor($width, $height);
+            // Get background dimensions
+            $bgWidth = imagesx($background);
+            $bgHeight = imagesy($background);
 
-            // Enable alpha blending and save alpha channel
-            imagealphablending($panel, true);
-            imagesavealpha($panel, true);
-
-            // Fill with transparent background
-            $transparent = imagecolorallocatealpha($panel, 0, 0, 0, 127);
-            imagefill($panel, 0, 0, $transparent);
-
-            // Add each character to the panel
-            foreach ($composition as $charId => $data) {
-                $this->logger->debug("Processing character image", [
-                    'character_id' => $charId,
-                    'image_url' => $data['image'],
-                    'position' => $data['position'] ?? 'default'
-                ]);
-
-                // Download and process the image
-                $characterImage = $this->loadImageFromUrl($data['image']);
-                if (!$characterImage) {
-                    throw new Exception("Failed to load character image: $charId");
+            // Process each character
+            foreach ($characterMap as $character) {
+                if (empty($character['cartoonify_url'])) {
+                    throw new Exception("Character missing cartoonify URL");
                 }
 
-                // Get image dimensions
-                $srcWidth = imagesx($characterImage);
-                $srcHeight = imagesy($characterImage);
+                // Load character image
+                $characterImage = $this->loadImageFromUrl($character['cartoonify_url']);
+                if (!$characterImage) {
+                    throw new Exception("Failed to load character image: " . $character['cartoonify_url']);
+                }
 
-                // Get position from composition data
-                $position = $data['position'] ?? ['x' => 0, 'y' => 0];
-                $scale = $data['position']['scale'] ?? 1.0;
+                // Get character dimensions
+                $charWidth = imagesx($characterImage);
+                $charHeight = imagesy($characterImage);
 
-                // Calculate target dimensions
-                $targetWidth = $srcWidth * $scale;
-                $targetHeight = $srcHeight * $scale;
+                // Calculate position (default to bottom center)
+                $position = $character['position'] ?? [
+                    'x' => $bgWidth / 2 - $charWidth / 2,
+                    'y' => $bgHeight - $charHeight - 20 // 20px from bottom
+                ];
 
-                // Calculate position (centered on the specified point)
-                $x = $position['x'] - ($targetWidth / 2);
-                $y = $position['y'] - ($targetHeight / 2);
-
-                // Copy and resize the character onto the panel
-                imagecopyresampled(
-                    $panel,
+                // Overlay character onto background
+                imagecopy(
+                    $background,
                     $characterImage,
-                    $x,
-                    $y,
+                    $position['x'],
+                    $position['y'],
                     0,
                     0,
-                    $targetWidth,
-                    $targetHeight,
-                    $srcWidth,
-                    $srcHeight
+                    $charWidth,
+                    $charHeight
                 );
 
-                // Clean up
+                // Clean up character image
                 imagedestroy($characterImage);
             }
 
             // Save the composed panel
-            $outputPath = rtrim($this->config->getPath('temp'), '/') . '/panel_' . ($jobId ?? uniqid()) . '.png';
-            if (!imagepng($panel, $outputPath)) {
+            $outputPath = rtrim($this->config->getPath('temp'), '/') . "/panel_{$panelId}.png";
+            if (!imagepng($background, $outputPath)) {
                 throw new Exception("Failed to save panel image: $outputPath");
             }
-            imagedestroy($panel);
+
+            // Clean up background image
+            imagedestroy($background);
 
             $this->logger->info("Panel composition completed", [
-                'output_path' => $outputPath,
-                'job_id' => $jobId
+                'panel_id' => $panelId,
+                'output_path' => $outputPath
             ]);
 
             return $outputPath;
         } catch (Exception $e) {
             $this->logger->error("Panel composition failed", [
+                'panel_id' => $panelId,
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-                'job_id' => $jobId
+                'trace' => $e->getTraceAsString()
             ]);
             throw $e;
         }
