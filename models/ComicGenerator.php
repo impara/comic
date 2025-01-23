@@ -150,12 +150,22 @@ class ComicGenerator
                 ],
             ];
     
-            // If you still want to remove the webhook in dev mode, that’s optional:
+            // If you still want to remove the webhook in dev mode, that's optional:
             if ($this->config->getEnvironment() === 'development') {
                 unset($requestData['webhook']);
             }
     
             $prediction = $this->replicateClient->createPrediction($requestData);
+
+            // Add NSFW content check
+            if (isset($prediction['nsfw_filter_failed']) && $prediction['nsfw_filter_failed']) {
+                $this->logger->warning('NSFW content detected in prompt', [
+                    'prompt' => $requestData['input']['prompt'],
+                    'prediction_id' => $prediction['id'],
+                    'type' => 'nsfw_attempt'
+                ]);
+                throw new Exception("Content rejected by safety filters. Please modify your story description.");
+            }
 
             $this->logger->debug('Background generation started', [
                 'prediction_id' => $prediction['id'],
@@ -259,7 +269,10 @@ class ComicGenerator
         $stylePrefix = $style !== 'default' ? "In $style style: " : '';
         $backgroundPrefix = $background !== 'default' ? "With $background background: " : '';
         
-        return trim($stylePrefix . $backgroundPrefix . $description);
+        // Safety enhancements
+        $safetyPrefix = "family-friendly comic panel, positive theme, no violence, no danger, safe content, ";
+        
+        return trim($safetyPrefix . $stylePrefix . $backgroundPrefix . $description);
     }
 
     /**
@@ -338,9 +351,14 @@ class ComicGenerator
 
     /**
      * Compose the final panel image
+     * 
+     * @param string $backgroundUrl URL of the background image
+     * @param array $characterMap Map of characters and their positions
+     * @param string $panelId Unique identifier for the panel
+     * @return string Path to the composed image
      */
-    public function composePanelImage(array $composition, string $description, array $options = []): string
+    public function composePanelImage(string $backgroundUrl, array $characterMap, string $panelId): string
     {
-        return $this->imageComposer->composePanelImage($composition, $description, $options);
+        return $this->imageComposer->composePanelImage($backgroundUrl, $characterMap, $panelId);
     }
 }

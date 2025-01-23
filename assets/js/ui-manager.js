@@ -64,6 +64,9 @@ export const UIManager = {
     },
 
     showError(message) {
+        if (message.includes('NSFW') || message.includes('blocked')) {
+            message += '<div class="mt-3 alert alert-warning">Tip: Avoid violent, dangerous, or adult themes. Focus on heroic actions and positive outcomes.</div>';
+        }
         $('#debugInfo').html(`<p class="text-danger">Error: ${message}</p>`);
         $('#generatingStatus').hide();
         $('#generateButton').prop('disabled', false).show();

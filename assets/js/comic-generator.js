@@ -129,7 +129,11 @@ export const ComicGenerator = {
                     this.handleCompletion(result);
                     return;
                 } else if (result.status === 'failed') {
-                    throw new Error(result.error || 'Comic generation failed');
+                    if (result.error?.includes('NSFW')) {
+                        throw new Error('Content blocked: Please modify your story to remove any violent or sensitive elements');
+                    } else {
+                        throw new Error(result.error || 'Comic generation failed');
+                    }
                 }
 
                 // Check for timeout
