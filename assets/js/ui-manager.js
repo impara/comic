@@ -135,8 +135,9 @@ export const UIManager = {
 
     showCompletionState() {
         console.log('Showing completion state');
-        // Hide generating message
+        // Clear any existing messages and states
         $('#generatingStatus').hide().empty();
+        $('#comic-panels').show();
 
         // Show completion message
         $('#completionStatus').show().html(`
@@ -148,20 +149,22 @@ export const UIManager = {
 
         // Update progress and show panels
         $('.progress-bar').css('width', '100%');
-        $('#comic-panels').show();
 
-        // Scroll to the comic panels
-        const panelsElement = document.getElementById('comic-panels');
-        if (panelsElement) {
-            panelsElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }
+        // Scroll to the comic panels with a slight delay to ensure content is rendered
+        setTimeout(() => {
+            const panelsElement = document.getElementById('comic-panels');
+            if (panelsElement) {
+                panelsElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        }, 100);
     },
 
     showCompletion(result) {
         console.log('Showing completion result:', result);
 
-        // Clear any existing messages first
+        // Clear any existing messages and states first
         $('#generatingStatus').hide().empty();
+        $('.generating-message').remove();
 
         // Show completion state
         this.showCompletionState();
@@ -181,6 +184,10 @@ export const UIManager = {
         // Update step indicators
         $('.step').removeClass('active completed');
         $('.step[data-step="4"]').addClass('active completed');
+
+        // Force a reflow to ensure UI updates
+        $('#comic-panels').css('display', 'none').height();
+        $('#comic-panels').css('display', 'block');
     },
 
     displayResult(imagePath) {

@@ -227,26 +227,15 @@ export const ComicGenerator = {
             return;
         }
 
-        // Clear any existing panels
+        // Clear any existing panels and states
         panelContainer.innerHTML = '';
+        if (this.uiManager) {
+            this.uiManager.updateProgress(100);
+        }
 
         // Create single panel element
         const panelElement = document.createElement('div');
         panelElement.className = 'comic-panel card p-3 mb-4';
-
-        // Create image with loading state
-        const img = document.createElement('img');
-        const BASE_URL = window.location.origin;
-
-        // Ensure the path starts with a slash and remove any double slashes
-        const cleanPath = state.output_url.replace(/\/+/g, '/');
-        const imagePath = cleanPath.startsWith('/') ? cleanPath : '/' + cleanPath;
-
-        console.log('Loading image from:', {
-            base: BASE_URL,
-            path: imagePath,
-            full: BASE_URL + imagePath
-        });
 
         // Create loading placeholder
         const loadingPlaceholder = document.createElement('div');
@@ -263,6 +252,17 @@ export const ComicGenerator = {
         panelContainer.appendChild(panelElement);
 
         // Configure image
+        const img = document.createElement('img');
+        const BASE_URL = window.location.origin;
+        const cleanPath = state.output_url.replace(/\/+/g, '/');
+        const imagePath = cleanPath.startsWith('/') ? cleanPath : '/' + cleanPath;
+
+        console.log('Loading image from:', {
+            base: BASE_URL,
+            path: imagePath,
+            full: BASE_URL + imagePath
+        });
+
         img.src = BASE_URL + imagePath;
         img.alt = 'Generated comic panel';
         img.className = 'comic-image img-fluid rounded';
@@ -283,13 +283,16 @@ export const ComicGenerator = {
             requestAnimationFrame(() => {
                 img.style.opacity = '1';
 
-                // Update UI to show completion
+                // Update UI to show completion after image is loaded
                 if (this.uiManager) {
-                    this.uiManager.showCompletion({
-                        totalPanels: 1,
-                        outputUrl: imagePath,
-                        errors: []
-                    });
+                    // Small delay to ensure smooth transition
+                    setTimeout(() => {
+                        this.uiManager.showCompletion({
+                            totalPanels: 1,
+                            outputUrl: imagePath,
+                            errors: []
+                        });
+                    }, 300);
                 }
             });
         };
