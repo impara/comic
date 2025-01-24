@@ -57,22 +57,35 @@ export const UIManager = {
 
     showGeneratingState() {
         console.log('Showing generating state');
+
+        // Clear previous states
+        this.reset();
+
         // Hide step 3 and show step 4
         $('#step3').removeClass('active');
         $('#step4').addClass('active');
 
-        // Show generating status with spinner
+        // Show generating status with initial message
         $('#generatingStatus').show().html(`
             <div class="alert alert-info generating-message">
                 <i class="fas fa-spinner fa-spin me-2"></i>
-                Your comic is being generated. Please wait...
+                Initializing comic generation...
             </div>
+            <div class="progress mb-3">
+                <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                     role="progressbar" 
+                     style="width: 0%" 
+                     aria-valuenow="0" 
+                     aria-valuemin="0" 
+                     aria-valuemax="100">
+                </div>
+            </div>
+            <div class="text-muted small text-center operation-status"></div>
         `);
 
         // Hide completion status and comic panels
         $('#completionStatus').hide();
         $('#comic-panels').hide().empty();
-        $('.progress-bar').css('width', '0%');
     },
 
     showError(message) {
@@ -85,17 +98,32 @@ export const UIManager = {
         $('.progress-bar').css('width', '0%');
     },
 
-    updateProgress(progress) {
-        console.log('Updating progress:', progress);
-        $('.progress-bar').css('width', `${progress}%`);
+    updateProgress(progress, operation) {
+        console.log('Updating progress:', progress, operation);
+
+        // Update progress bar
+        const progressBar = $('.progress-bar');
+        progressBar.css('width', `${progress}%`);
+        progressBar.attr('aria-valuenow', progress);
 
         // Update the generating message if needed
         if (progress < 100) {
+            const operationText = operation || 'Generating your comic';
+            $('.operation-status').text(operationText);
+
+            // Update the main status message
             $('#generatingStatus').show().find('.generating-message').html(`
                 <i class="fas fa-spinner fa-spin me-2"></i>
-                Your comic is being generated (${progress}% complete)...
+                ${operationText} (${progress}% complete)
             `);
+        } else {
+            // At 100%, show a completion message but wait for final confirmation
+            $('.operation-status').text('Finalizing your comic...');
         }
+
+        // Force progress bar animation
+        progressBar.addClass('progress-bar-striped progress-bar-animated');
+        setTimeout(() => progressBar[0]?.offsetHeight, 0);
     },
 
     updateDebugInfo(info) {
@@ -135,9 +163,10 @@ export const UIManager = {
 
     showCompletionState() {
         console.log('Showing completion state');
-        // Clear any existing messages and states
+
+        // Clear generating states
         $('#generatingStatus').hide().empty();
-        $('#comic-panels').show();
+        $('.generating-message').remove();
 
         // Show completion message
         $('#completionStatus').show().html(`
@@ -147,10 +176,15 @@ export const UIManager = {
             </div>
         `);
 
-        // Update progress and show panels
-        $('.progress-bar').css('width', '100%');
+        // Update progress to 100%
+        $('.progress-bar')
+            .css('width', '100%')
+            .removeClass('progress-bar-striped progress-bar-animated');
 
-        // Scroll to the comic panels with a slight delay to ensure content is rendered
+        // Show the comic panels container
+        $('#comic-panels').show();
+
+        // Scroll to the comic panels with a slight delay
         setTimeout(() => {
             const panelsElement = document.getElementById('comic-panels');
             if (panelsElement) {

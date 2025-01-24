@@ -185,25 +185,49 @@ export const ComicGenerator = {
             output_url: state.output_url
         });
 
+        // Update UI progress
         if (this.uiManager) {
             this.uiManager.updateProgress(progress);
+
+            // Update status message based on current operation
+            let statusMessage = 'Generating your comic...';
+            if (state.current_operation === 'cartoonify') {
+                statusMessage = 'Cartoonifying character...';
+            } else if (state.current_operation === 'panel_generation') {
+                statusMessage = 'Creating comic panel...';
+            } else if (state.current_operation === 'composition') {
+                statusMessage = 'Composing final comic...';
+            }
+
+            $('#generatingStatus').show().find('.generating-message').html(`
+                <i class="fas fa-spinner fa-spin me-2"></i>
+                ${statusMessage} (${progress}% complete)
+            `);
         }
 
-        // Update UI with job status information
+        // Update debug info
         if (this.uiManager) {
             this.uiManager.updateDebugInfo({
                 jobId: this.jobId,
                 status: state.status,
                 progress: state.progress,
+                current_operation: state.current_operation,
                 output_url: state.output_url,
                 error: state.error,
                 last_update: new Date().toISOString()
             });
         }
 
-        // If status is completed and we have an output URL, handle completion
+        // Check for completion
         if (state.status === 'completed' && state.output_url) {
+            console.log('Comic generation completed, handling completion...');
             this.handleCompletion(state);
+        } else if (state.status === 'failed') {
+            console.error('Comic generation failed:', state.error);
+            if (this.uiManager) {
+                this.uiManager.showError(state.error || 'Comic generation failed');
+            }
+            this.stopPolling();
         }
     },
 
