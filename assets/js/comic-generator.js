@@ -212,7 +212,7 @@ export const ComicGenerator = {
     handleCompletion(state) {
         this.stopPolling();
 
-        if (!state || !state.output) {
+        if (!state || !state.output_url) {
             console.error('Invalid completion state:', state);
             if (this.uiManager) {
                 this.uiManager.showError('Comic generation completed but no output was received');
@@ -230,89 +230,47 @@ export const ComicGenerator = {
         // Clear any existing panels
         panelContainer.innerHTML = '';
 
-        if (state.output.panels && Array.isArray(state.output.panels)) {
-            // Create and append each panel
-            state.output.panels.forEach((panel, index) => {
-                if (!panel.composed_url) {
-                    console.error(`Panel ${index} missing composed URL:`, panel);
-                    return;
-                }
+        // Create single panel element
+        const panelElement = document.createElement('div');
+        panelElement.className = 'comic-panel';
 
-                // Create panel wrapper
-                const panelElement = document.createElement('div');
-                panelElement.className = 'comic-panel';
+        // Create image with loading state
+        const img = document.createElement('img');
+        img.src = state.output_url;
+        img.alt = 'Generated comic panel';
+        img.className = 'comic-image';
+        img.loading = 'lazy';
 
-                // Create image with loading state
-                const img = document.createElement('img');
-                img.src = panel.composed_url;
-                img.alt = panel.description || `Panel ${index + 1}`;
-                img.className = 'comic-image';
-                img.loading = 'lazy'; // Enable lazy loading
+        // Add loading indicator
+        img.style.opacity = '0';
+        img.onload = () => {
+            img.style.transition = 'opacity 0.3s ease-in';
+            img.style.opacity = '1';
+        };
 
-                // Add loading indicator
-                img.style.opacity = '0';
-                img.onload = () => {
-                    img.style.transition = 'opacity 0.3s ease-in';
-                    img.style.opacity = '1';
-                };
+        // Add error handling
+        img.onerror = () => {
+            console.error(`Failed to load panel image: ${state.output_url}`);
+            img.src = '/assets/images/error-placeholder.png';
+            img.alt = 'Failed to load panel';
+        };
 
-                // Add error handling
-                img.onerror = () => {
-                    console.error(`Failed to load panel image: ${panel.composed_url}`);
-                    img.src = '/assets/images/error-placeholder.png';
-                    img.alt = 'Failed to load panel';
-                };
+        // Append image
+        panelElement.appendChild(img);
+        panelContainer.appendChild(panelElement);
 
-                // Add description if available
-                if (panel.description) {
-                    const desc = document.createElement('p');
-                    desc.className = 'panel-description';
-                    desc.textContent = panel.description;
-                    panelElement.appendChild(desc);
-                }
-
-                // Append image
-                panelElement.appendChild(img);
-                panelContainer.appendChild(panelElement);
+        // Show completion message
+        if (this.uiManager) {
+            this.uiManager.showCompletion({
+                totalPanels: 1,
+                outputUrl: state.output_url,
+                errors: []
             });
-
-            // Show completion message
-            if (this.uiManager) {
-                this.uiManager.showCompletion({
-                    totalPanels: state.output.panels.length,
-                    outputUrl: state.output_url,
-                    errors: state.output.errors || []
-                });
-            }
-        } else {
-            // Fallback to single output URL if no panels array
-            if (state.output_url) {
-                const img = document.createElement('img');
-                img.src = state.output_url;
-                img.alt = 'Generated comic strip';
-                img.className = 'comic-image';
-                panelContainer.appendChild(img);
-
-                if (this.uiManager) {
-                    this.uiManager.showCompletion({
-                        totalPanels: 1,
-                        outputUrl: state.output_url,
-                        errors: []
-                    });
-                }
-            } else {
-                console.error('No panels or output URL found in completion state:', state);
-                if (this.uiManager) {
-                    this.uiManager.showError('Comic generation completed but no images were produced');
-                }
-            }
         }
 
         // Log completion
         console.log('Comic generation completed:', {
-            totalPanels: state.output.panels?.length || 0,
-            outputUrl: state.output_url,
-            errors: state.output.errors || []
+            outputUrl: state.output_url
         });
     }
 };
