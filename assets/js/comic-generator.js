@@ -220,6 +220,8 @@ export const ComicGenerator = {
             return;
         }
 
+        console.log('Handling completion with state:', state);
+
         // Get the panels container
         const panelContainer = document.getElementById('comic-panels');
         if (!panelContainer) {
@@ -236,8 +238,19 @@ export const ComicGenerator = {
 
         // Create image with loading state
         const img = document.createElement('img');
-        const BASE_URL = window.location.origin; // Could be loaded from config.js
-        img.src = BASE_URL + state.output_url;
+        const BASE_URL = window.location.origin;
+
+        // Ensure the path starts with a slash and remove any double slashes
+        const cleanPath = state.output_url.replace(/\/+/g, '/');
+        const imagePath = cleanPath.startsWith('/') ? cleanPath : '/' + cleanPath;
+
+        console.log('Loading image from:', {
+            base: BASE_URL,
+            path: imagePath,
+            full: BASE_URL + imagePath
+        });
+
+        img.src = BASE_URL + imagePath;
         img.alt = 'Generated comic panel';
         img.className = 'comic-image';
         img.loading = 'lazy';
@@ -245,19 +258,26 @@ export const ComicGenerator = {
         // Add loading indicator
         img.style.opacity = '0';
         img.onload = () => {
+            console.log('Image loaded successfully:', img.src);
             img.style.transition = 'opacity 0.3s ease-in';
             img.style.opacity = '1';
+            if (this.uiManager) {
+                this.uiManager.showCompletionState();
+            }
         };
 
-        // Add error handling
-        img.onerror = function () {
-            console.error('Failed to load panel image:', state.output_url);
-            this.src = 'assets/images/placeholder-character.png'; // Use existing placeholder
-            this.style.border = '2px solid #dc3545';
-            this.alt = 'Failed to load comic panel';
+        img.onerror = (error) => {
+            console.error('Failed to load comic image:', {
+                src: img.src,
+                error: error,
+                state: state
+            });
+            if (this.uiManager) {
+                this.uiManager.showError('Failed to load the generated comic image. Please try refreshing the page.');
+            }
         };
 
-        // Append image
+        // Add image to panel
         panelElement.appendChild(img);
         panelContainer.appendChild(panelElement);
 
@@ -265,15 +285,10 @@ export const ComicGenerator = {
         if (this.uiManager) {
             this.uiManager.showCompletion({
                 totalPanels: 1,
-                outputUrl: state.output_url,
+                outputUrl: imagePath,
                 errors: []
             });
         }
-
-        // Log completion
-        console.log('Comic generation completed:', {
-            outputUrl: state.output_url
-        });
     }
 };
 

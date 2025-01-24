@@ -10,7 +10,12 @@ class ImageComposer
     {
         $this->logger = $logger;
         $this->config = $config;
-        $this->outputDir = $this->config->getPath('temp');
+        $this->outputDir = $this->config->getPath('public') . '/temp';
+        
+        // Ensure temp directory exists
+        if (!is_dir($this->outputDir)) {
+            mkdir($this->outputDir, 0755, true);
+        }
     }
 
     /**
@@ -73,8 +78,16 @@ class ImageComposer
             }
 
             // Save the composed panel
-            $relativePath = "/temp/panel_$panelId.png";
+            $uniqueId = uniqid('panel_');
+            $relativePath = "/temp/{$uniqueId}.png";
             $outputPath = $this->config->getPath('public') . $relativePath;
+            
+            // Ensure the directory exists
+            $outputDir = dirname($outputPath);
+            if (!is_dir($outputDir)) {
+                mkdir($outputDir, 0755, true);
+            }
+            
             if (!imagepng($background, $outputPath)) {
                 throw new Exception("Failed to save panel image: $outputPath");
             }
@@ -84,7 +97,8 @@ class ImageComposer
 
             $this->logger->info("Panel composition completed", [
                 'panel_id' => $panelId,
-                'output_path' => $outputPath
+                'output_path' => $outputPath,
+                'relative_path' => $relativePath
             ]);
 
             return $relativePath;
