@@ -73,7 +73,8 @@ class ImageComposer
             }
 
             // Save the composed panel
-            $outputPath = rtrim($this->config->getPath('temp'), '/') . "/panel_{$panelId}.png";
+            $relativePath = "/temp/panel_$panelId.png";
+            $outputPath = $this->config->getPath('public') . $relativePath;
             if (!imagepng($background, $outputPath)) {
                 throw new Exception("Failed to save panel image: $outputPath");
             }
@@ -86,7 +87,7 @@ class ImageComposer
                 'output_path' => $outputPath
             ]);
 
-            return $outputPath;
+            return $relativePath;
         } catch (Exception $e) {
             $this->logger->error("Panel composition failed", [
                 'panel_id' => $panelId,

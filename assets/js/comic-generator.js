@@ -249,10 +249,11 @@ export const ComicGenerator = {
         };
 
         // Add error handling
-        img.onerror = () => {
-            console.error(`Failed to load panel image: ${state.output_url}`);
-            img.src = '/assets/images/error-placeholder.png';
-            img.alt = 'Failed to load panel';
+        img.onerror = function () {
+            console.error('Failed to load panel image:', state.output_url);
+            this.src = 'assets/images/placeholder-character.png'; // Use existing placeholder
+            this.style.border = '2px solid #dc3545';
+            this.alt = 'Failed to load comic panel';
         };
 
         // Append image
