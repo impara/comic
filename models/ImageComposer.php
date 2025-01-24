@@ -10,7 +10,7 @@ class ImageComposer
     {
         $this->logger = $logger;
         $this->config = $config;
-        $this->outputDir = rtrim($this->config->getPath('output'), '/');
+        $this->outputDir = $this->config->getPath('temp');
     }
 
     /**

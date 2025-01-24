@@ -236,7 +236,8 @@ export const ComicGenerator = {
 
         // Create image with loading state
         const img = document.createElement('img');
-        img.src = state.output_url;
+        const BASE_URL = window.location.origin; // Could be loaded from config.js
+        img.src = BASE_URL + state.output_url;
         img.alt = 'Generated comic panel';
         img.className = 'comic-image';
         img.loading = 'lazy';
@@ -302,7 +303,8 @@ function checkJobStatus(jobId) {
 
                     // Create image element
                     const img = document.createElement('img');
-                    img.src = panel.composed_url;
+                    const BASE_URL = window.location.origin; // Could be loaded from config.js
+                    img.src = BASE_URL + panel.composed_url;
                     img.alt = `Comic panel: ${panel.description}`;
                     img.className = 'comic-image';
 
@@ -315,6 +317,9 @@ function checkJobStatus(jobId) {
                     panelElement.appendChild(img);
                     panelElement.appendChild(desc);
                     panelContainer.appendChild(panelElement);
+
+                    // Add temporary debug logging to verify URLs
+                    console.log('Received composed URL:', panel.composed_url);
                 });
 
                 // Show completion message

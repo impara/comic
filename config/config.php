@@ -86,9 +86,9 @@ return [
     'paths' => [
         'root' => $rootDir,
         'public' => $publicDir,
-        'output' => '/generated',
+        'output' => $publicDir . '/generated',
         'logs' => $rootDir . '/logs',
-        'temp' => '/temp',
+        'temp' => $publicDir . '/temp',
         'cache' => $rootDir . '/cache'
     ],
 
