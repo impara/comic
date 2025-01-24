@@ -56,11 +56,18 @@ export const UIManager = {
     },
 
     showGeneratingState() {
+        console.log('Showing generating state');
         $('#step3').removeClass('active');
         $('#step4').addClass('active');
-        $('#generatingStatus').show();
+        $('#generatingStatus').show().html(`
+            <div class="alert alert-info">
+                <i class="fas fa-spinner fa-spin me-2"></i>
+                Your comic is being generated. Please wait...
+            </div>
+        `);
         $('#completionStatus').hide();
         $('.progress-bar').css('width', '0%');
+        $('#comic-panels').hide();
     },
 
     showError(message) {
@@ -115,14 +122,19 @@ export const UIManager = {
     showCompletionState() {
         console.log('Showing completion state');
         $('#generatingStatus').hide();
-        $('#completionStatus').show();
+        $('#completionStatus').show().html(`
+            <div class="alert alert-success">
+                <i class="fas fa-check-circle me-2"></i>
+                Your comic has been generated successfully!
+            </div>
+        `);
         $('.progress-bar').css('width', '100%');
-
-        // Show the comic panels container
         $('#comic-panels').show();
 
-        // Hide the loading message
-        $('.generating-message').hide();
+        // Scroll to the comic panels
+        $('html, body').animate({
+            scrollTop: $('#comic-panels').offset().top - 100
+        }, 500);
     },
 
     showCompletion(result) {
@@ -140,6 +152,10 @@ export const UIManager = {
 
         // Enable sharing buttons if present
         $('.share-button').prop('disabled', false);
+
+        // Update step indicators
+        $('.step').removeClass('active completed');
+        $('.step[data-step="4"]').addClass('active completed');
     },
 
     displayResult(imagePath) {

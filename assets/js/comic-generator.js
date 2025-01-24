@@ -234,7 +234,7 @@ export const ComicGenerator = {
 
         // Create single panel element
         const panelElement = document.createElement('div');
-        panelElement.className = 'comic-panel';
+        panelElement.className = 'comic-panel card p-3 mb-4';
 
         // Create image with loading state
         const img = document.createElement('img');
@@ -250,17 +250,41 @@ export const ComicGenerator = {
             full: BASE_URL + imagePath
         });
 
+        // Create loading placeholder
+        const loadingPlaceholder = document.createElement('div');
+        loadingPlaceholder.className = 'text-center p-4';
+        loadingPlaceholder.innerHTML = `
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <div class="mt-2">Loading your comic...</div>
+        `;
+        panelElement.appendChild(loadingPlaceholder);
+
+        // Add panel to container immediately to show loading state
+        panelContainer.appendChild(panelElement);
+
+        // Configure image
         img.src = BASE_URL + imagePath;
         img.alt = 'Generated comic panel';
-        img.className = 'comic-image';
-        img.loading = 'lazy';
-
-        // Add loading indicator
+        img.className = 'comic-image img-fluid rounded';
         img.style.opacity = '0';
+        img.style.transition = 'opacity 0.3s ease-in';
+
+        // Handle image load
         img.onload = () => {
             console.log('Image loaded successfully:', img.src);
-            img.style.transition = 'opacity 0.3s ease-in';
-            img.style.opacity = '1';
+
+            // Remove loading placeholder
+            loadingPlaceholder.remove();
+
+            // Add image to panel
+            panelElement.appendChild(img);
+
+            // Fade in the image
+            requestAnimationFrame(() => {
+                img.style.opacity = '1';
+            });
 
             // Update UI to show completion
             if (this.uiManager) {
@@ -270,36 +294,31 @@ export const ComicGenerator = {
                     errors: []
                 });
             }
-
-            // Hide generating message and show completion message
-            const generatingMsg = document.querySelector('.generating-message');
-            if (generatingMsg) {
-                generatingMsg.style.display = 'none';
-            }
-
-            const completionMsg = document.querySelector('.completion-message');
-            if (completionMsg) {
-                completionMsg.style.display = 'block';
-            }
         };
 
+        // Handle image load error
         img.onerror = (error) => {
             console.error('Failed to load comic image:', {
                 src: img.src,
                 error: error,
                 state: state
             });
+
+            // Remove loading placeholder
+            loadingPlaceholder.remove();
+
+            // Show error in panel
+            panelElement.innerHTML = `
+                <div class="alert alert-danger m-0">
+                    <i class="fas fa-exclamation-circle me-2"></i>
+                    Failed to load the comic image. Please try refreshing the page.
+                </div>
+            `;
+
             if (this.uiManager) {
                 this.uiManager.showError('Failed to load the generated comic image. Please try refreshing the page.');
             }
         };
-
-        // Add image to panel
-        panelElement.appendChild(img);
-        panelContainer.appendChild(panelElement);
-
-        // Show the panel container
-        panelContainer.style.display = 'block';
     }
 };
 
