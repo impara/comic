@@ -113,8 +113,33 @@ export const UIManager = {
     },
 
     showCompletionState() {
+        console.log('Showing completion state');
         $('#generatingStatus').hide();
         $('#completionStatus').show();
+        $('.progress-bar').css('width', '100%');
+
+        // Show the comic panels container
+        $('#comic-panels').show();
+
+        // Hide the loading message
+        $('.generating-message').hide();
+    },
+
+    showCompletion(result) {
+        console.log('Showing completion result:', result);
+        this.showCompletionState();
+
+        if (result.errors && result.errors.length > 0) {
+            const errorHtml = result.errors.map(error =>
+                `<div class="alert alert-danger">${error}</div>`
+            ).join('');
+            $('#debugInfo').html(errorHtml);
+        } else {
+            $('#debugInfo').html('');
+        }
+
+        // Enable sharing buttons if present
+        $('.share-button').prop('disabled', false);
     },
 
     displayResult(imagePath) {

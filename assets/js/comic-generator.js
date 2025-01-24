@@ -261,8 +261,25 @@ export const ComicGenerator = {
             console.log('Image loaded successfully:', img.src);
             img.style.transition = 'opacity 0.3s ease-in';
             img.style.opacity = '1';
+
+            // Update UI to show completion
             if (this.uiManager) {
-                this.uiManager.showCompletionState();
+                this.uiManager.showCompletion({
+                    totalPanels: 1,
+                    outputUrl: imagePath,
+                    errors: []
+                });
+            }
+
+            // Hide generating message and show completion message
+            const generatingMsg = document.querySelector('.generating-message');
+            if (generatingMsg) {
+                generatingMsg.style.display = 'none';
+            }
+
+            const completionMsg = document.querySelector('.completion-message');
+            if (completionMsg) {
+                completionMsg.style.display = 'block';
             }
         };
 
@@ -281,14 +298,8 @@ export const ComicGenerator = {
         panelElement.appendChild(img);
         panelContainer.appendChild(panelElement);
 
-        // Show completion message
-        if (this.uiManager) {
-            this.uiManager.showCompletion({
-                totalPanels: 1,
-                outputUrl: imagePath,
-                errors: []
-            });
-        }
+        // Show the panel container
+        panelContainer.style.display = 'block';
     }
 };
 
