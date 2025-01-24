@@ -179,6 +179,12 @@ export const ComicGenerator = {
         }
 
         const progress = state.progress || 0;
+        console.log('Updating progress:', {
+            status: state.status,
+            progress: progress,
+            output_url: state.output_url
+        });
+
         if (this.uiManager) {
             this.uiManager.updateProgress(progress);
         }
@@ -195,17 +201,9 @@ export const ComicGenerator = {
             });
         }
 
-        // Log progress info
-        console.log('Comic generation progress:', {
-            jobId: this.jobId,
-            status: state.status,
-            progress: state.progress,
-            output_url: state.output_url
-        });
-
-        // Only log raw state in debug mode
-        if (window.DEBUG_MODE) {
-            console.debug('Raw comic generation state:', state);
+        // If status is completed and we have an output URL, handle completion
+        if (state.status === 'completed' && state.output_url) {
+            this.handleCompletion(state);
         }
     },
 
@@ -284,16 +282,16 @@ export const ComicGenerator = {
             // Fade in the image
             requestAnimationFrame(() => {
                 img.style.opacity = '1';
-            });
 
-            // Update UI to show completion
-            if (this.uiManager) {
-                this.uiManager.showCompletion({
-                    totalPanels: 1,
-                    outputUrl: imagePath,
-                    errors: []
-                });
-            }
+                // Update UI to show completion
+                if (this.uiManager) {
+                    this.uiManager.showCompletion({
+                        totalPanels: 1,
+                        outputUrl: imagePath,
+                        errors: []
+                    });
+                }
+            });
         };
 
         // Handle image load error

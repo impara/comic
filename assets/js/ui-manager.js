@@ -57,17 +57,22 @@ export const UIManager = {
 
     showGeneratingState() {
         console.log('Showing generating state');
+        // Hide step 3 and show step 4
         $('#step3').removeClass('active');
         $('#step4').addClass('active');
+
+        // Show generating status with spinner
         $('#generatingStatus').show().html(`
-            <div class="alert alert-info">
+            <div class="alert alert-info generating-message">
                 <i class="fas fa-spinner fa-spin me-2"></i>
                 Your comic is being generated. Please wait...
             </div>
         `);
+
+        // Hide completion status and comic panels
         $('#completionStatus').hide();
+        $('#comic-panels').hide().empty();
         $('.progress-bar').css('width', '0%');
-        $('#comic-panels').hide();
     },
 
     showError(message) {
@@ -81,7 +86,16 @@ export const UIManager = {
     },
 
     updateProgress(progress) {
+        console.log('Updating progress:', progress);
         $('.progress-bar').css('width', `${progress}%`);
+
+        // Update the generating message if needed
+        if (progress < 100) {
+            $('#generatingStatus').show().find('.generating-message').html(`
+                <i class="fas fa-spinner fa-spin me-2"></i>
+                Your comic is being generated (${progress}% complete)...
+            `);
+        }
     },
 
     updateDebugInfo(info) {
@@ -121,24 +135,35 @@ export const UIManager = {
 
     showCompletionState() {
         console.log('Showing completion state');
-        $('#generatingStatus').hide();
+        // Hide generating message
+        $('#generatingStatus').hide().empty();
+
+        // Show completion message
         $('#completionStatus').show().html(`
             <div class="alert alert-success">
                 <i class="fas fa-check-circle me-2"></i>
                 Your comic has been generated successfully!
             </div>
         `);
+
+        // Update progress and show panels
         $('.progress-bar').css('width', '100%');
         $('#comic-panels').show();
 
         // Scroll to the comic panels
-        $('html, body').animate({
-            scrollTop: $('#comic-panels').offset().top - 100
-        }, 500);
+        const panelsElement = document.getElementById('comic-panels');
+        if (panelsElement) {
+            panelsElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
     },
 
     showCompletion(result) {
         console.log('Showing completion result:', result);
+
+        // Clear any existing messages first
+        $('#generatingStatus').hide().empty();
+
+        // Show completion state
         this.showCompletionState();
 
         if (result.errors && result.errors.length > 0) {
